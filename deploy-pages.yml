@@ -1,0 +1,68 @@
+name: Deploy to Pages
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
+# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: latest
+
+      - name: Cache NuGet Packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+          
+      - name: Install wasm-tools
+        run: dotnet workload install wasm-tools
+
+      - name: Change base in index.html and service-worker.published.js to repository name
+        run: |
+          sed -i 's/<base href="\/" \/>/<base href="\/${{ github.event.repository.name }}\/" \/>/g' TmScores.Showcase/wwwroot/index.html
+          sed -i 's/const base = "\/";/const base = "\/${{ github.event.repository.name }}\/";/g' TmScores.Showcase/wwwroot/service-worker.published.js
+
+      - name: Publish
+        run: dotnet publish TmScores.Showcase -c Release -o publish
+        
+      - name: Add .nojekyll file
+        run: touch publish/wwwroot/.nojekyll
+        
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: publish/wwwroot/.
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

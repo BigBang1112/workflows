@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, dev ]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    
+    steps:
+    - uses: actions/checkout@v6
+  
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: latest
+
+    - name: Cache NuGet Packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    
+    - name: Restore dependencies
+      run: dotnet restore
+    
+    - name: Build
+      run: dotnet build -c Release --no-restore /p:ContinuousIntegrationBuild=true
+    
+    - name: Test
+      run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage" --results-directory ./coverage
+    
+    - name: Generate Code Coverage Summary
+      run: |
+        dotnet tool install -g dotnet-reportgenerator-globaltool
+        reportgenerator -reports:"./coverage/**/coverage.cobertura.xml" -targetdir:"./coveragereport" -reporttypes:"MarkdownSummaryGithub"
+
+    - name: Publish Coverage to Job Summary
+      shell: bash
+      run: cat ./coveragereport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
