@@ -4,31 +4,31 @@ on:
   workflow_call:
     inputs:
       dotnet-version:
-        description: '.NET version to use'
+        description: .NET version to use
         type: string
-        default: 'latest'
+        default: latest
       workloads:
-        description: 'Additional workloads to install (e.g. wasm-tools)'
+        description: Additional workloads to install (e.g. wasm-tools)
         type: string
-        default: ''
+        default: ""
       os:
-        description: 'JSON array of OS runners, e.g. ["ubuntu-latest","windows-latest"]'
+        description: JSON array of OS runners, e.g. ["ubuntu-latest","windows-latest"]
         type: string
         default: '["ubuntu-latest", "windows-latest"]'
       build-args:
-        description: 'Additional arguments for dotnet build'
+        description: Additional arguments for dotnet build
         type: string
-        default: ''
+        default: ""
       test-args:
-        description: 'Additional arguments for dotnet test'
+        description: Additional arguments for dotnet test
         type: string
-        default: ''
+        default: ""
       enable-coverage:
-        description: 'Generate and publish code coverage summary'
+        description: Generate and publish code coverage summary
         type: boolean
         default: true
       enable-cache:
-        description: 'Cache NuGet packages'
+        description: Cache NuGet packages
         type: boolean
         default: true
 
@@ -36,60 +36,60 @@ jobs:
   build:
     name: Build
     runs-on: ${{ matrix.os }}
-    
+
     strategy:
       fail-fast: false
       matrix:
         os: ${{ fromJson(inputs.os) }}
-    
+
     steps:
-    - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
 
-    - name: Set DOTNET_INSTALL_DIR
-      run: echo "DOTNET_INSTALL_DIR=$HOME/.dotnet" >> $GITHUB_ENV
+      - name: Set DOTNET_INSTALL_DIR
+        run: echo "DOTNET_INSTALL_DIR=$HOME/.dotnet" >> $GITHUB_ENV
 
-    - name: Cache Workloads
-      if: inputs.workloads != '' && runner.os != 'Windows'
-      id: cache-workloads
-      uses: actions/cache@v5
-      with:
-        path: |
-          ~/.dotnet/metadata
-          ~/.dotnet/packs
-          ~/.dotnet/library-packs
-        key: ${{ runner.os }}-workloads-${{ inputs.dotnet-version }}-${{ inputs.workloads }}
-  
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v5
-      with:
-        dotnet-version: ${{ inputs.dotnet-version }}
-        workloads: ${{ inputs.workloads }}
+      - name: Cache Workloads
+        if: inputs.workloads != '' && runner.os != 'Windows'
+        id: cache-workloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.dotnet/metadata
+            ~/.dotnet/packs
+            ~/.dotnet/library-packs
+          key: ${{ runner.os }}-workloads-${{ inputs.dotnet-version }}-${{ inputs.workloads }}
 
-    - name: Cache NuGet Packages
-      if: inputs.enable-cache
-      uses: actions/cache@v5
-      with:
-        path: ~/.nuget/packages
-        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets') }}
-        restore-keys: |
-          ${{ runner.os }}-nuget-
-    
-    - name: Restore dependencies
-      run: dotnet restore
-    
-    - name: Build
-      run: dotnet build -c Release --no-restore -p:ContinuousIntegrationBuild=true ${{ inputs.build-args }}
-    
-    - name: Test
-      run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage" --results-directory ./coverage ${{ inputs.test-args }}
-    
-    - name: Generate Code Coverage Summary
-      if: inputs.enable-coverage
-      run: |
-        dotnet tool install -g dotnet-reportgenerator-globaltool
-        reportgenerator -reports:"./coverage/**/coverage.cobertura.xml" -targetdir:"./coveragereport" -reporttypes:"MarkdownSummaryGithub"
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+          workloads: ${{ inputs.workloads }}
 
-    - name: Publish Coverage to Job Summary
-      if: inputs.enable-coverage
-      shell: bash
-      run: cat ./coveragereport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
+      - name: Cache NuGet Packages
+        if: inputs.enable-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore -p:ContinuousIntegrationBuild=true ${{ inputs.build-args }}
+
+      - name: Test
+        run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage" --results-directory ./coverage ${{ inputs.test-args }}
+
+      - name: Generate Code Coverage Summary
+        if: inputs.enable-coverage
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool
+          reportgenerator -reports:"./coverage/**/coverage.cobertura.xml" -targetdir:"./coveragereport" -reporttypes:"MarkdownSummaryGithub"
+
+      - name: Publish Coverage to Job Summary
+        if: inputs.enable-coverage
+        shell: bash
+        run: cat ./coveragereport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY

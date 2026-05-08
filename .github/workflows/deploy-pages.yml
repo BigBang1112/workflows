@@ -4,23 +4,23 @@ on:
   workflow_call:
     inputs:
       project:
-        description: 'Path to the Blazor WASM project to publish (e.g. src/MyApp)'
+        description: Path to the Blazor WASM project to publish (e.g. src/MyApp)
         type: string
         required: true
       dotnet-version:
-        description: '.NET version to use'
+        description: .NET version to use
         type: string
-        default: 'latest'
+        default: latest
       workloads:
-        description: 'Additional workloads to install (e.g. wasm-tools)'
+        description: Additional workloads to install (e.g. wasm-tools)
         type: string
-        default: 'wasm-tools'
+        default: wasm-tools
       enable-cache:
-        description: 'Cache NuGet packages'
+        description: Cache NuGet packages
         type: boolean
         default: true
       enable-coverage:
-        description: 'Generate HTML coverage report and publish it to /coverage/ on the site'
+        description: Generate HTML coverage report and publish it to /coverage/ on the site
         type: boolean
         default: false
 
@@ -42,7 +42,7 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-      
+
     runs-on: ubuntu-latest
 
     steps:
@@ -91,7 +91,7 @@ jobs:
 
       - name: Publish
         run: dotnet publish ${{ inputs.project }} -c Release -o publish
-        
+
       - name: Generate Coverage Report
         if: inputs.enable-coverage
         run: |
@@ -100,7 +100,7 @@ jobs:
 
       - name: Add .nojekyll file
         run: touch publish/wwwroot/.nojekyll
-        
+
       - name: Setup Pages
         uses: actions/configure-pages@v6
 

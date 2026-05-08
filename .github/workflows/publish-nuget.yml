@@ -4,27 +4,27 @@ on:
   workflow_call:
     inputs:
       package-prefix:
-        description: 'Prefix filter for NuGet package selection (e.g. "MyCompany.")'
+        description: Prefix filter for NuGet package selection (e.g. "MyCompany.")
         type: string
-        default: ''
+        default: ""
       dotnet-version:
-        description: '.NET version to use'
+        description: .NET version to use
         type: string
-        default: 'latest'
+        default: latest
       enable-coverage:
-        description: 'Generate and publish code coverage summary'
+        description: Generate and publish code coverage summary
         type: boolean
         default: true
       push-to-nuget:
-        description: 'Publish packages to nuget.org'
+        description: Publish packages to nuget.org
         type: boolean
         default: true
       push-to-github:
-        description: 'Publish packages to GitHub Packages'
+        description: Publish packages to GitHub Packages
         type: boolean
         default: true
       upload-to-release:
-        description: 'Upload packages to the GitHub Release'
+        description: Upload packages to the GitHub Release
         type: boolean
         default: true
     secrets:
@@ -35,83 +35,83 @@ permissions:
   contents: write # important for release description edit and asset upload
   packages: write
 
-jobs:  
+jobs:
   build:
     name: Build & Pack
     runs-on: ubuntu-latest
-    
+
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_BODY: ${{ github.event.release.body }}
 
     steps:
-    - uses: actions/checkout@v6
-  
-    - name: Set release information
-      if: github.event_name == 'release'
-      run: |
-        FINAL_BODY="***[Release is being automatically created, please wait...](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})***
-          
-        $RELEASE_BODY"
-        gh release edit ${{ github.ref_name }} -n "$FINAL_BODY"
-          
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v5
-      with:
-        dotnet-version: ${{ inputs.dotnet-version }}
-      
-    - name: Build
-      run: dotnet build -c Release -p:ContinuousIntegrationBuild=true
-      
-    - name: Test
-      run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage" --results-directory ./coverage
+      - uses: actions/checkout@v6
 
-    - name: Generate Code Coverage Summary
-      if: inputs.enable-coverage
-      run: |
-        dotnet tool install -g dotnet-reportgenerator-globaltool
-        reportgenerator -reports:"./coverage/**/coverage.cobertura.xml" -targetdir:"./coveragereport" -reporttypes:"MarkdownSummaryGithub"
+      - name: Set release information
+        if: github.event_name == 'release'
+        run: |
+          FINAL_BODY="***[Release is being automatically created, please wait...](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})***
+            
+          $RELEASE_BODY"
+          gh release edit ${{ github.ref_name }} -n "$FINAL_BODY"
 
-    - name: Publish Coverage to Job Summary
-      if: inputs.enable-coverage
-      run: cat ./coveragereport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
-    
-    - name: Pack
-      run: dotnet pack -c Release --no-build --output ./packages
-        
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v7
-      with:
-        name: nuget-packages
-        path: ./packages/${{ inputs.package-prefix }}*.*nupkg
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
 
-  publish:    
+      - name: Build
+        run: dotnet build -c Release -p:ContinuousIntegrationBuild=true
+
+      - name: Test
+        run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage" --results-directory ./coverage
+
+      - name: Generate Code Coverage Summary
+        if: inputs.enable-coverage
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool
+          reportgenerator -reports:"./coverage/**/coverage.cobertura.xml" -targetdir:"./coveragereport" -reporttypes:"MarkdownSummaryGithub"
+
+      - name: Publish Coverage to Job Summary
+        if: inputs.enable-coverage
+        run: cat ./coveragereport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Pack
+        run: dotnet pack -c Release --no-build --output ./packages
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget-packages
+          path: ./packages/${{ inputs.package-prefix }}*.*nupkg
+
+  publish:
     needs: build
     name: Publish Packages
     runs-on: ubuntu-latest
-    
+
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PACKAGE_PREFIX: ${{ inputs.package-prefix }}
 
-    steps:    
-    - name: Download Artifacts
-      uses: actions/download-artifact@v8
-      with:
-        name: nuget-packages
-        path: ./packages
-        
-    - name: Publish packages to nuget.org
-      if: inputs.push-to-nuget
-      run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json --skip-duplicate
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: nuget-packages
+          path: ./packages
 
-    - name: Publish packages to GitHub
-      if: inputs.push-to-github
-      run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.GITHUB_TOKEN }} -s https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --skip-duplicate
-    
-    - name: Upload packages to GitHub Release
-      if: inputs.upload-to-release && github.event_name == 'release'
-      run: gh release upload ${{ github.ref_name }} "./packages/${PACKAGE_PREFIX}*.nupkg" --repo ${{ github.repository }}
+      - name: Publish packages to nuget.org
+        if: inputs.push-to-nuget
+        run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Publish packages to GitHub
+        if: inputs.push-to-github
+        run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.GITHUB_TOKEN }} -s https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --skip-duplicate
+
+      - name: Upload packages to GitHub Release
+        if: inputs.upload-to-release && github.event_name == 'release'
+        run: gh release upload ${{ github.ref_name }} "./packages/${PACKAGE_PREFIX}*.nupkg" --repo ${{ github.repository }}
 
   finalize-description:
     needs: publish
@@ -121,12 +121,12 @@ jobs:
 
     runs-on: ubuntu-latest
     name: Finalize release description
-    
+
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_BODY: ${{ github.event.release.body }}
-    
-    steps:      
+
+    steps:
       - name: Set final release information
         run: |
           if [ "${{ needs.publish.result }}" == "success" ]; then
@@ -134,9 +134,9 @@ jobs:
           else
             STATUS_MSG=$'> [!WARNING]\n> The [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) failed. Some assets may be missing.'
           fi
-          
+
           FINAL_BODY="${RELEASE_BODY}
-          
+
           $STATUS_MSG"
 
           gh release edit ${{ github.ref_name }} -n "$FINAL_BODY" --repo ${{ github.repository }}

@@ -4,19 +4,19 @@ on:
   workflow_call:
     inputs:
       yamlfmt-version:
-        description: 'yamlfmt version to install (e.g. 0.21.0)'
+        description: yamlfmt version to install (e.g. 0.21.0)
         type: string
-        default: '0.21.0'
+        default: "0.21.0"
       args:
-        description: 'Arguments passed to yamlfmt (default: .)'
+        description: "Arguments passed to yamlfmt (default: .)"
         type: string
-        default: '.'
+        default: "."
       auto-commit:
-        description: 'Commit and push formatted files back to the branch'
+        description: Commit and push formatted files back to the branch
         type: boolean
         default: false
       lint:
-        description: 'Run in lint mode (fail if files are not formatted)'
+        description: Run in lint mode (fail if files are not formatted)
         type: boolean
         default: false
 

@@ -108,7 +108,7 @@ Publishes a .NET project for multiple runtimes, merges all outputs into a single
 | `dotnet-version` | .NET version | `latest` |
 | `artifact-folder` | Intermediate merge folder name | `Plugin` |
 
-### `yamlfmt.yml` — YAML Format
+### `yml-formatter.yml` — YAML Formatter
 
 Runs [`yamlfmt`](https://github.com/google/yamlfmt) to format or lint YAML files. Can optionally auto-commit formatted files back to the branch.
 
