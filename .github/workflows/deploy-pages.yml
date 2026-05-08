@@ -33,11 +33,26 @@ concurrency:
 
 jobs:
   deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+      
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Cache Workloads
+        if: inputs.workloads != ''
+        id: cache-workloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ env.DOTNET_ROOT }}/metadata
+            ${{ env.DOTNET_ROOT }}/packs
+            ${{ env.DOTNET_ROOT }}/library-packs
+          key: ${{ runner.os }}-workloads-${{ inputs.dotnet-version }}-${{ inputs.workloads }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
