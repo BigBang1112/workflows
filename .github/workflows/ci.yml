@@ -49,7 +49,7 @@ jobs:
       run: echo "DOTNET_INSTALL_DIR=$HOME/.dotnet" >> $GITHUB_ENV
 
     - name: Cache Workloads
-      if: inputs.workloads != ''
+      if: inputs.workloads != '' && runner.os != 'Windows'
       id: cache-workloads
       uses: actions/cache@v5
       with:
