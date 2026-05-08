@@ -1,0 +1,16 @@
+name: Self — YAML Format
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  yamlfmt:
+    uses: ./.github/workflows/yamlfmt.yml
+    with:
+      auto-commit: true

@@ -107,3 +107,16 @@ Publishes a .NET project for multiple runtimes, merges all outputs into a single
 | `matrix` | JSON array of `{os, runtime, executable-extension}` objects | `win-x64` + `linux-x64` |
 | `dotnet-version` | .NET version | `latest` |
 | `artifact-folder` | Intermediate merge folder name | `Plugin` |
+
+### `yamlfmt.yml` — YAML Format
+
+Runs [`yamlfmt`](https://github.com/google/yamlfmt) to format or lint YAML files. Can optionally auto-commit formatted files back to the branch.
+
+| Input | Description | Default |
+|---|---|---|
+| `yamlfmt-version` | yamlfmt version to install | `0.21.0` |
+| `args` | Arguments passed to yamlfmt | `.` |
+| `auto-commit` | Commit and push formatted files back to the branch | `false` |
+| `lint` | Run in lint mode (fail if files are not formatted) | `false` |
+
+Requires `contents: write` permission when `auto-commit` is enabled.
