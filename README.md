@@ -30,6 +30,7 @@ Builds and tests a .NET solution across one or more OS runners with optional cod
 | Input | Description | Default |
 |---|---|---|
 | `dotnet-version` | .NET version | `latest` |
+| `workloads` | Comma-separated workloads to install | |
 | `os` | JSON array of runners | `["ubuntu-latest", "windows-latest"]` |
 | `build-args` | Extra `dotnet build` arguments | |
 | `test-args` | Extra `dotnet test` arguments | |
