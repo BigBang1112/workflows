@@ -1,0 +1,127 @@
+name: Publish
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: 'Path to the project to publish (e.g. src/MyApp)'
+        type: string
+        required: true
+      zip-prefix:
+        description: 'Prefix for the output zip file names (e.g. MyApp)'
+        type: string
+        required: true
+      matrix:
+        description: 'JSON array of {os, runtime} objects'
+        type: string
+        default: '[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]'
+      dotnet-version:
+        description: '.NET version to use'
+        type: string
+        default: 'latest'
+
+permissions:
+  contents: write # important for release description edit and asset upload
+
+jobs:
+  prepare-description:
+    name: Prepare Release Description
+    runs-on: ubuntu-latest
+    
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_BODY: ${{ github.event.release.body }}
+      
+    steps:
+      - name: Set release information
+        run: |
+          FINAL_BODY="***[Release is being automatically created, please wait...](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})***
+          
+          $RELEASE_BODY"
+          gh release edit ${{ github.ref_name }} -n "$FINAL_BODY" --repo ${{ github.repository }}
+
+  build:
+    needs: prepare-description
+    name: Build (${{ matrix.runtime }})
+    strategy:
+      matrix:
+        include: ${{ fromJson(inputs.matrix) }}
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v6
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+      
+    - name: Publish ${{ matrix.runtime }}
+      run: dotnet publish ${{ inputs.project }} -c Release -r ${{ matrix.runtime }} -o ./publish
+
+    - name: Zip (${{ matrix.runtime }})
+      shell: bash
+      run: |
+        cd publish
+        zip -r "../${{ inputs.zip-prefix }}.${{ github.ref_name }}.${{ matrix.runtime }}.zip" .
+        cd ..
+
+    - name: Calculate SHA256
+      shell: bash
+      run: |
+        ZIP_NAME="${{ inputs.zip-prefix }}.${{ github.ref_name }}.${{ matrix.runtime }}.zip"
+        HASH=$(sha256sum "$ZIP_NAME" | awk '{print $1}')
+        echo "## SHA256 Checksum (${{ matrix.runtime }})" >> $GITHUB_STEP_SUMMARY
+        echo "`${HASH}`" >> $GITHUB_STEP_SUMMARY
+      
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: build-${{ matrix.runtime }}
+        path: ${{ inputs.zip-prefix }}.${{ github.ref_name }}.${{ matrix.runtime }}.zip
+
+  package:
+    needs: build
+    name: Package & Upload
+    runs-on: ubuntu-latest
+    
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v8
+      with:
+        path: ./zips
+        merge-multiple: true
+
+    - name: Upload ZIPs to Release
+      run: gh release upload ${{ github.ref_name }} ./zips/*.zip --repo ${{ github.repository }}
+
+  finalize-description:
+    needs: package
+    # Run this job even if build/package fails so we can remove the "please wait..." text
+    if: always()
+
+    runs-on: ubuntu-latest
+    name: Finalize release description
+    
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_BODY: ${{ github.event.release.body }}
+    
+    steps:      
+      - name: Set final release information
+        run: |
+          if [ "${{ needs.package.result }}" == "success" ]; then
+            STATUS_MSG="Assets were automatically generated using the [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+          else
+            STATUS_MSG=$'> [!WARNING]\n> The [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) failed. Some assets may be missing.'
+          fi
+          
+          FINAL_BODY="${RELEASE_BODY}
+          
+          $STATUS_MSG"
+
+          gh release edit ${{ github.ref_name }} -n "$FINAL_BODY" --repo ${{ github.repository }}

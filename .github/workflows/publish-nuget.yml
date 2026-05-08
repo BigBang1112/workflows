@@ -1,8 +1,35 @@
-name: Publish
+name: Publish NuGet
 
 on:
-  release:
-    types: [ published ]
+  workflow_call:
+    inputs:
+      package-prefix:
+        description: 'Prefix filter for NuGet package selection (e.g. "MyCompany.")'
+        type: string
+        default: ''
+      dotnet-version:
+        description: '.NET version to use'
+        type: string
+        default: 'latest'
+      enable-coverage:
+        description: 'Generate and publish code coverage summary'
+        type: boolean
+        default: true
+      push-to-nuget:
+        description: 'Publish packages to nuget.org'
+        type: boolean
+        default: true
+      push-to-github:
+        description: 'Publish packages to GitHub Packages'
+        type: boolean
+        default: true
+      upload-to-release:
+        description: 'Upload packages to the GitHub Release'
+        type: boolean
+        default: true
+    secrets:
+      NUGET_API_KEY:
+        required: false
 
 permissions:
   contents: write # important for release description edit and asset upload
@@ -31,23 +58,22 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v5
       with:
-        dotnet-version: latest
-          
-    - name: Restore dependencies
-      run: dotnet restore
+        dotnet-version: ${{ inputs.dotnet-version }}
       
     - name: Build
-      run: dotnet build -c Release --no-restore -p:ContinuousIntegrationBuild=true
+      run: dotnet build -c Release -p:ContinuousIntegrationBuild=true
       
     - name: Test
       run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage" --results-directory ./coverage
 
     - name: Generate Code Coverage Summary
+      if: inputs.enable-coverage
       run: |
         dotnet tool install -g dotnet-reportgenerator-globaltool
         reportgenerator -reports:"./coverage/**/coverage.cobertura.xml" -targetdir:"./coveragereport" -reporttypes:"MarkdownSummaryGithub"
 
     - name: Publish Coverage to Job Summary
+      if: inputs.enable-coverage
       run: cat ./coveragereport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
     
     - name: Pack
@@ -57,7 +83,7 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: nuget-packages
-        path: ./packages/*.*nupkg
+        path: ./packages/${{ inputs.package-prefix }}*.*nupkg
 
   publish:    
     needs: build
@@ -66,23 +92,26 @@ jobs:
     
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PACKAGE_PREFIX: ${{ inputs.package-prefix }}
 
     steps:    
     - name: Download Artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: nuget-packages
         path: ./packages
         
     - name: Publish packages to nuget.org
-      run: dotnet nuget push ./packages/*.nupkg -k ${{ secrets.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json --skip-duplicate
+      if: inputs.push-to-nuget
+      run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json --skip-duplicate
 
     - name: Publish packages to GitHub
-      run: dotnet nuget push ./packages/*.nupkg -k ${{ secrets.GITHUB_TOKEN }} -s https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --skip-duplicate
+      if: inputs.push-to-github
+      run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.GITHUB_TOKEN }} -s https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --skip-duplicate
     
     - name: Upload packages to GitHub Release
-      if: github.event_name == 'release'
-      run: gh release upload ${{ github.ref_name }} ./packages/*.nupkg --repo ${{ github.repository }}
+      if: inputs.upload-to-release && github.event_name == 'release'
+      run: gh release upload ${{ github.ref_name }} "./packages/${PACKAGE_PREFIX}*.nupkg" --repo ${{ github.repository }}
 
   finalize-description:
     needs: publish

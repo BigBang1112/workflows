@@ -1,9 +1,24 @@
 name: Deploy to Pages
 
 on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      project:
+        description: 'Path to the Blazor WASM project to publish (e.g. src/MyApp)'
+        type: string
+        required: true
+      dotnet-version:
+        description: '.NET version to use'
+        type: string
+        default: 'latest'
+      install-wasm-tools:
+        description: 'Install the wasm-tools workload'
+        type: boolean
+        default: true
+      enable-cache:
+        description: 'Cache NuGet packages'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -18,10 +33,6 @@ concurrency:
 
 jobs:
   deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
     runs-on: ubuntu-latest
 
     steps:
@@ -31,9 +42,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: latest
+          dotnet-version: ${{ inputs.dotnet-version }}
 
       - name: Cache NuGet Packages
+        if: inputs.enable-cache
         uses: actions/cache@v5
         with:
           path: ~/.nuget/packages
@@ -42,15 +54,17 @@ jobs:
             ${{ runner.os }}-nuget-
           
       - name: Install wasm-tools
+        if: inputs.install-wasm-tools
         run: dotnet workload install wasm-tools
 
-      - name: Change base in index.html and service-worker.published.js to repository name
-        run: |
-          sed -i 's/<base href="\/" \/>/<base href="\/${{ github.event.repository.name }}\/" \/>/g' TmScores.Showcase/wwwroot/index.html
-          sed -i 's/const base = "\/";/const base = "\/${{ github.event.repository.name }}\/";/g' TmScores.Showcase/wwwroot/service-worker.published.js
+      - name: Patch base href in index.html
+        run: sed -i 's/<base href="\/" \/>/<base href="\/${{ github.event.repository.name }}\/" \/>/g' ${{ inputs.project }}/wwwroot/index.html
+
+      - name: Patch base in service-worker.published.js
+        run: sed -i 's/const base = "\//const base = "\/${{ github.event.repository.name }}\//g' ${{ inputs.project }}/wwwroot/service-worker.published.js
 
       - name: Publish
-        run: dotnet publish TmScores.Showcase -c Release -o publish
+        run: dotnet publish ${{ inputs.project }} -c Release -o publish
         
       - name: Add .nojekyll file
         run: touch publish/wwwroot/.nojekyll

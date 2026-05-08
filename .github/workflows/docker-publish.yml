@@ -1,0 +1,93 @@
+name: Publish Docker Image
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        description: 'JSON array of {project, image_name} objects'
+        type: string
+        required: true
+      platforms:
+        description: 'Target platforms for Docker build'
+        type: string
+        default: 'linux/amd64,linux/arm64'
+      dockerfile-prefix:
+        description: 'Path prefix used to locate Dockerfiles (e.g. "Src/")'
+        type: string
+        default: 'Src/'
+      push-to-dockerhub:
+        description: 'Push images to Docker Hub'
+        type: boolean
+        default: true
+      push-to-ghcr:
+        description: 'Push images to GitHub Container Registry'
+        type: boolean
+        default: true
+      dockerhub-username:
+        description: 'Docker Hub username (required when push-to-dockerhub is true)'
+        type: string
+        default: ''
+    secrets:
+      DOCKERHUB_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(inputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: |
+            ${{ inputs.push-to-dockerhub && format('{0}/{1}', inputs.dockerhub-username, matrix.image_name) || '' }}
+            ${{ inputs.push-to-ghcr && format('ghcr.io/{0}/{1}', github.repository_owner, matrix.image_name) || '' }}
+          tags: |
+            type=raw,value=latest
+            type=semver,pattern={{version}}
+          
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      
+      - name: Login to Docker Hub
+        if: inputs.push-to-dockerhub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ inputs.dockerhub-username }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Login to GitHub Container Registry
+        if: inputs.push-to-ghcr
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          platforms: ${{ inputs.platforms }}
+          file: ${{ inputs.dockerfile-prefix }}${{ matrix.project }}/Dockerfile
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          push: true
+          build-args: |
+            BUILDKIT_CONTEXT_KEEP_GIT_DIR=true
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}

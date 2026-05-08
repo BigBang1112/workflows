@@ -1,0 +1,131 @@
+name: Publish Release (Combined ZIP)
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: 'Path/name of the project to publish (e.g. src/MyApp or MyApp)'
+        type: string
+        required: true
+      zip-name:
+        description: 'Output zip file name without extension (e.g. MyPlugin)'
+        type: string
+        required: true
+      matrix:
+        description: 'JSON array of {os, runtime, executable-extension} objects'
+        type: string
+        default: '[{"os":"windows-latest","runtime":"win-x64","executable-extension":".exe"},{"os":"ubuntu-latest","runtime":"linux-x64","executable-extension":""}]'
+      dotnet-version:
+        description: '.NET version to use'
+        type: string
+        default: 'latest'
+      artifact-folder:
+        description: 'Intermediate folder name used when merging build artifacts'
+        type: string
+        default: 'Plugin'
+
+permissions:
+  contents: write # important for release description edit and asset upload
+  packages: read
+
+jobs:
+  prepare-description:
+    name: Prepare Release Description
+    runs-on: ubuntu-latest
+    
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_BODY: ${{ github.event.release.body }}
+      
+    steps:
+      - name: Set release information
+        run: |
+          FINAL_BODY="***[Release is being automatically created, please wait...](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})***
+          
+          $RELEASE_BODY"
+          gh release edit ${{ github.ref_name }} -n "$FINAL_BODY" --repo ${{ github.repository }}
+
+  build:
+    needs: prepare-description
+    name: Build Executables
+    strategy:
+      matrix:
+        include: ${{ fromJson(inputs.matrix) }}
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+
+    - name: Publish application
+      run: dotnet publish ${{ inputs.project }} -c Release -r ${{ matrix.runtime }} -o ./publish
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: build-${{ matrix.os }}
+        path: ./publish/${{ inputs.project }}${{ matrix.executable-extension }}
+
+  package:
+    needs: build
+    name: Package & Upload
+    runs-on: ubuntu-latest
+    
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v8
+      with:
+        pattern: build-*
+        path: ./${{ inputs.artifact-folder }}
+        merge-multiple: true
+
+    - name: Create plugin zip
+      run: |
+        cd ${{ inputs.artifact-folder }}
+        zip -r ../${{ inputs.zip-name }}.zip .
+        cd ..
+
+    - name: Calculate SHA256
+      id: calc_sha
+      run: |
+        HASH=$(sha256sum "${{ inputs.zip-name }}.zip" | awk '{print $1}')
+        echo "## SHA256 Checksum" >> $GITHUB_STEP_SUMMARY
+        echo "`${HASH}`" >> $GITHUB_STEP_SUMMARY
+
+    - name: Upload ${{ inputs.zip-name }}.zip to this release
+      run: gh release upload ${{ github.ref_name }} ${{ inputs.zip-name }}.zip --repo ${{ github.repository }}
+
+  finalize-description:
+    needs: package
+    # Run this job even if build/package fails so we can remove the "please wait..." text from the release
+    if: always()
+
+    runs-on: ubuntu-latest
+    name: Finalize release description
+    
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_BODY: ${{ github.event.release.body }}
+    
+    steps:      
+      - name: Set final release information
+        run: |
+          if [ "${{ needs.package.result }}" == "success" ]; then
+            STATUS_MSG="Assets were automatically generated using the [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+          else
+            STATUS_MSG=$'> [!WARNING]\n> The [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) failed. Some assets may be missing.'
+          fi
+          
+          FINAL_BODY="${RELEASE_BODY}
+          
+          $STATUS_MSG"
+
+          gh release edit ${{ github.ref_name }} -n "$FINAL_BODY" --repo ${{ github.repository }}
