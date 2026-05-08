@@ -49,6 +49,7 @@ Requires `pages: write` and `id-token: write` permissions on the caller.
 | `dotnet-version` | .NET version | `latest` |
 | `workloads` | Comma-separated workloads to install | `wasm-tools` |
 | `enable-cache` | Cache NuGet packages | `true` |
+| `enable-coverage` | Generate HTML report at `/coverage/` on the site | `false` |
 
 ### `docker-publish.yml` — Publish Docker Images
 

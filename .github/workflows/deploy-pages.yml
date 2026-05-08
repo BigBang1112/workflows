@@ -19,6 +19,10 @@ on:
         description: 'Cache NuGet packages'
         type: boolean
         default: true
+      enable-coverage:
+        description: 'Generate HTML coverage report and publish it to /coverage/ on the site'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -33,6 +37,8 @@ concurrency:
 
 jobs:
   deploy:
+    name: Deploy to Pages
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -72,6 +78,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
+      - name: Test
+        if: inputs.enable-coverage
+        continue-on-error: true
+        run: dotnet test -c Release --collect:"XPlat Code Coverage" --results-directory ./coverage
+
       - name: Patch base href in index.html
         run: sed -i 's/<base href="\/" \/>/<base href="\/${{ github.event.repository.name }}\/" \/>/g' ${{ inputs.project }}/wwwroot/index.html
 
@@ -81,6 +92,12 @@ jobs:
       - name: Publish
         run: dotnet publish ${{ inputs.project }} -c Release -o publish
         
+      - name: Generate Coverage Report
+        if: inputs.enable-coverage
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool
+          reportgenerator -reports:"./coverage/**/coverage.cobertura.xml" -targetdir:"publish/wwwroot/coverage" -reporttypes:"Html"
+
       - name: Add .nojekyll file
         run: touch publish/wwwroot/.nojekyll
         
