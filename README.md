@@ -46,7 +46,7 @@ Requires `pages: write` and `id-token: write` permissions on the caller.
 |---|---|---|
 | `project` | *(required)* Path to the Blazor WASM project | |
 | `dotnet-version` | .NET version | `latest` |
-| `install-wasm-tools` | Install the `wasm-tools` workload | `true` |
+| `workloads` | Comma-separated workloads to install | `wasm-tools` |
 | `enable-cache` | Cache NuGet packages | `true` |
 
 ### `docker-publish.yml` — Publish Docker Images

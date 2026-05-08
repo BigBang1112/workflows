@@ -11,10 +11,10 @@ on:
         description: '.NET version to use'
         type: string
         default: 'latest'
-      install-wasm-tools:
-        description: 'Install the wasm-tools workload'
-        type: boolean
-        default: true
+      workloads:
+        description: 'Additional workloads to install (e.g. wasm-tools)'
+        type: string
+        default: 'wasm-tools'
       enable-cache:
         description: 'Cache NuGet packages'
         type: boolean
@@ -43,6 +43,7 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
+          workloads: ${{ inputs.workloads }}
 
       - name: Cache NuGet Packages
         if: inputs.enable-cache
@@ -52,10 +53,6 @@ jobs:
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets') }}
           restore-keys: |
             ${{ runner.os }}-nuget-
-          
-      - name: Install wasm-tools
-        if: inputs.install-wasm-tools
-        run: dotnet workload install wasm-tools
 
       - name: Patch base href in index.html
         run: sed -i 's/<base href="\/" \/>/<base href="\/${{ github.event.repository.name }}\/" \/>/g' ${{ inputs.project }}/wwwroot/index.html
