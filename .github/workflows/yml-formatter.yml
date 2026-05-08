@@ -1,4 +1,4 @@
-name: YAML Format
+name: YML Formatter
 
 on:
   workflow_call:
@@ -21,8 +21,8 @@ on:
         default: false
 
 jobs:
-  yamlfmt:
-    name: yamlfmt
+  ymlfmt:
+    name: YML Formatter
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -44,5 +44,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git diff --cached --quiet || git commit -m "style: auto-format YAML files"
+          git diff --cached --quiet || git commit -m "Auto-format YML files"
           git push
