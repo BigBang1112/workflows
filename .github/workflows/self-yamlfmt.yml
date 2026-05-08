@@ -6,12 +6,11 @@ on:
   pull_request:
     branches: [main]
 
-permissions:
-  contents: write
-  workflows: write
-
 jobs:
   yamlfmt:
     uses: ./.github/workflows/yamlfmt.yml
+    permissions:
+      contents: write
+      workflows: write
     with:
       auto-commit: true
