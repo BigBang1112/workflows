@@ -49,6 +49,7 @@ jobs:
 
       - name: Set release information
         if: github.event_name == 'release'
+        continue-on-error: true
         run: |
           FINAL_BODY="***[Release is being automatically created, please wait...](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})***
             
@@ -102,11 +103,11 @@ jobs:
           path: ./packages
 
       - name: Publish packages to nuget.org
-        if: inputs.push-to-nuget
+        if: inputs.push-to-nuget && github.event_name != 'workflow_dispatch'
         run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Publish packages to GitHub
-        if: inputs.push-to-github
+        if: inputs.push-to-github && github.event_name != 'workflow_dispatch'
         run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.GITHUB_TOKEN }} -s https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --skip-duplicate
 
       - name: Upload packages to GitHub Release
