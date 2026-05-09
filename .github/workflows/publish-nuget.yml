@@ -7,10 +7,26 @@ on:
         description: Prefix filter for NuGet package selection (e.g. "MyCompany.")
         type: string
         default: ""
+      project-path:
+        description: Path(s) to build and pack. Supports wildcards (e.g. "src/**/*.csproj"). Defaults to the solution/project in the repo root.
+        type: string
+        default: ""
+      test-path:
+        description: Path(s) to test projects. Supports wildcards (e.g. "tests/**/*.csproj"). Defaults to all test projects discovered by dotnet.
+        type: string
+        default: ""
+      pack-path:
+        description: Path(s) to pack. Supports wildcards. Defaults to project-path, then the repo root.
+        type: string
+        default: ""
       dotnet-version:
         description: .NET version to use
         type: string
         default: latest
+      workloads:
+        description: Additional workloads to install (e.g. wasm-tools)
+        type: string
+        default: ""
       enable-coverage:
         description: Generate and publish code coverage summary
         type: boolean
@@ -56,16 +72,26 @@ jobs:
           $RELEASE_BODY"
           gh release edit ${{ github.ref_name }} -n "$FINAL_BODY"
 
+      - name: Set DOTNET_INSTALL_DIR
+        run: echo "DOTNET_INSTALL_DIR=$HOME/.dotnet" >> $GITHUB_ENV
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
+          workloads: ${{ inputs.workloads }}
 
       - name: Build
-        run: dotnet build -c Release -p:ContinuousIntegrationBuild=true
+        run: |
+          for project in ${{ inputs.project-path != '' && inputs.project-path || '.' }}; do
+            dotnet build "$project" -c Release -p:ContinuousIntegrationBuild=true
+          done
 
       - name: Test
-        run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage" --results-directory ./coverage
+        run: |
+          for project in ${{ inputs.test-path != '' && inputs.test-path || '.' }}; do
+            dotnet test "$project" -c Release --no-build --collect:"XPlat Code Coverage" --results-directory ./coverage
+          done
 
       - name: Generate Code Coverage Summary
         if: inputs.enable-coverage
@@ -78,7 +104,10 @@ jobs:
         run: cat ./coveragereport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
 
       - name: Pack
-        run: dotnet pack -c Release --no-build --output ./packages
+        run: |
+          for project in ${{ inputs.pack-path != '' && inputs.pack-path || inputs.project-path != '' && inputs.project-path || '.' }}; do
+            dotnet pack "$project" -c Release --output ./packages
+          done
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
@@ -90,6 +119,8 @@ jobs:
     needs: build
     name: Publish Packages
     runs-on: ubuntu-latest
+
+    if: github.event_name != 'workflow_dispatch'
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -103,16 +134,16 @@ jobs:
           path: ./packages
 
       - name: Publish packages to nuget.org
-        if: inputs.push-to-nuget && github.event_name != 'workflow_dispatch'
+        if: inputs.push-to-nuget
         run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Publish packages to GitHub
-        if: inputs.push-to-github && github.event_name != 'workflow_dispatch'
+        if: inputs.push-to-github
         run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.GITHUB_TOKEN }} -s https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --skip-duplicate
 
       - name: Upload packages to GitHub Release
         if: inputs.upload-to-release && github.event_name == 'release'
-        run: gh release upload ${{ github.ref_name }} "./packages/${PACKAGE_PREFIX}*.nupkg" --repo ${{ github.repository }}
+        run: gh release upload ${{ github.ref_name }} "./packages/"${PACKAGE_PREFIX}*.nupkg --repo ${{ github.repository }}
 
   finalize:
     needs: [build, publish]
@@ -122,7 +153,7 @@ jobs:
     if: always() && github.event_name == 'release'
 
     runs-on: ubuntu-latest
-    name: Finalize release
+    name: Finalize Release
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
