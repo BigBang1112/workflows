@@ -79,6 +79,7 @@ Builds, tests, packs, and publishes NuGet packages to nuget.org and/or GitHub Pa
 | `test-path` | Path(s) to test projects. Supports wildcards. | |
 | `pack-path` | Path(s) to pack. Supports wildcards. Defaults to `project-path`. | |
 | `dotnet-version` | .NET version | `latest` |
+| `workloads` | Comma-separated workloads to install | |
 | `enable-coverage` | Generate and publish coverage summary | `true` |
 | `push-to-nuget` | Publish to nuget.org | `true` |
 | `push-to-github` | Publish to GitHub Packages | `true` |

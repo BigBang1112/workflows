@@ -23,6 +23,10 @@ on:
         description: .NET version to use
         type: string
         default: latest
+      workloads:
+        description: Additional workloads to install (e.g. wasm-tools)
+        type: string
+        default: ""
       enable-coverage:
         description: Generate and publish code coverage summary
         type: boolean
@@ -68,10 +72,14 @@ jobs:
           $RELEASE_BODY"
           gh release edit ${{ github.ref_name }} -n "$FINAL_BODY"
 
+      - name: Set DOTNET_INSTALL_DIR
+        run: echo "DOTNET_INSTALL_DIR=$HOME/.dotnet" >> $GITHUB_ENV
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
+          workloads: ${{ inputs.workloads }}
 
       - name: Build
         run: |
