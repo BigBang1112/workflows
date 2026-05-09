@@ -115,7 +115,7 @@ jobs:
         run: |
           if [ -n "${{ inputs.pack-path }}" ]; then
             for project in ${{ inputs.pack-path }}; do
-              dotnet pack "$project" -c Release --no-build --output ./packages
+              dotnet pack "$project" -c Release --output ./packages
             done
           elif [ -n "${{ inputs.project-path }}" ]; then
             for project in ${{ inputs.project-path }}; do
