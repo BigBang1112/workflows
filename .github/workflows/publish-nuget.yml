@@ -7,6 +7,14 @@ on:
         description: Prefix filter for NuGet package selection (e.g. "MyCompany.")
         type: string
         default: ""
+      project-path:
+        description: Path(s) to build and pack. Supports wildcards (e.g. "src/**/*.csproj"). Defaults to the solution/project in the repo root.
+        type: string
+        default: ""
+      test-path:
+        description: Path(s) to test projects. Supports wildcards (e.g. "tests/**/*.csproj"). Defaults to all test projects discovered by dotnet.
+        type: string
+        default: ""
       dotnet-version:
         description: .NET version to use
         type: string
@@ -62,10 +70,16 @@ jobs:
           dotnet-version: ${{ inputs.dotnet-version }}
 
       - name: Build
-        run: dotnet build -c Release -p:ContinuousIntegrationBuild=true
+        run: |
+          for project in ${{ inputs.project-path != '' && inputs.project-path || '.' }}; do
+            dotnet build "$project" -c Release -p:ContinuousIntegrationBuild=true
+          done
 
       - name: Test
-        run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage" --results-directory ./coverage
+        run: |
+          for project in ${{ inputs.test-path != '' && inputs.test-path || '.' }}; do
+            dotnet test "$project" -c Release --no-build --collect:"XPlat Code Coverage" --results-directory ./coverage
+          done
 
       - name: Generate Code Coverage Summary
         if: inputs.enable-coverage
@@ -78,7 +92,10 @@ jobs:
         run: cat ./coveragereport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
 
       - name: Pack
-        run: dotnet pack -c Release --no-build --output ./packages
+        run: |
+          for project in ${{ inputs.project-path != '' && inputs.project-path || '.' }}; do
+            dotnet pack "$project" -c Release --no-build --output ./packages
+          done
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
