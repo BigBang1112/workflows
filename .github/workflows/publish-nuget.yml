@@ -112,6 +112,8 @@ jobs:
     name: Publish Packages
     runs-on: ubuntu-latest
 
+    if: github.event_name != 'workflow_dispatch'
+
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PACKAGE_PREFIX: ${{ inputs.package-prefix }}
@@ -124,11 +126,11 @@ jobs:
           path: ./packages
 
       - name: Publish packages to nuget.org
-        if: inputs.push-to-nuget && github.event_name != 'workflow_dispatch'
+        if: inputs.push-to-nuget
         run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Publish packages to GitHub
-        if: inputs.push-to-github && github.event_name != 'workflow_dispatch'
+        if: inputs.push-to-github
         run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.GITHUB_TOKEN }} -s https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --skip-duplicate
 
       - name: Upload packages to GitHub Release
