@@ -15,6 +15,10 @@ on:
         description: Path(s) to test projects. Supports wildcards (e.g. "tests/**/*.csproj"). Defaults to all test projects discovered by dotnet.
         type: string
         default: ""
+      pack-path:
+        description: Path(s) to pack. Supports wildcards. Defaults to project-path, then the repo root.
+        type: string
+        default: ""
       dotnet-version:
         description: .NET version to use
         type: string
@@ -93,7 +97,7 @@ jobs:
 
       - name: Pack
         run: |
-          for project in ${{ inputs.project-path != '' && inputs.project-path || '.' }}; do
+          for project in ${{ inputs.pack-path != '' && inputs.pack-path || inputs.project-path != '' && inputs.project-path || '.' }}; do
             dotnet pack "$project" -c Release --no-build --output ./packages
           done
 
