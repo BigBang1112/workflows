@@ -83,15 +83,23 @@ jobs:
 
       - name: Build
         run: |
-          for project in ${{ inputs.project-path != '' && inputs.project-path || '.' }}; do
-            dotnet build "$project" -c Release -p:ContinuousIntegrationBuild=true
-          done
+          if [ -n "${{ inputs.project-path }}" ]; then
+            for project in ${{ inputs.project-path }}; do
+              dotnet build "$project" -c Release -p:ContinuousIntegrationBuild=true
+            done
+          else
+            dotnet build -c Release -p:ContinuousIntegrationBuild=true
+          fi
 
       - name: Test
         run: |
-          for project in ${{ inputs.test-path != '' && inputs.test-path || '.' }}; do
-            dotnet test "$project" -c Release --no-build --collect:"XPlat Code Coverage" --results-directory ./coverage
-          done
+          if [ -n "${{ inputs.test-path }}" ]; then
+            for project in ${{ inputs.test-path }}; do
+              dotnet test "$project" -c Release --collect:"XPlat Code Coverage" --results-directory ./coverage
+            done
+          else
+            dotnet test -c Release --collect:"XPlat Code Coverage" --results-directory ./coverage
+          fi
 
       - name: Generate Code Coverage Summary
         if: inputs.enable-coverage
@@ -105,9 +113,17 @@ jobs:
 
       - name: Pack
         run: |
-          for project in ${{ inputs.pack-path != '' && inputs.pack-path || inputs.project-path != '' && inputs.project-path || '.' }}; do
-            dotnet pack "$project" -c Release --output ./packages
-          done
+          if [ -n "${{ inputs.pack-path }}" ]; then
+            for project in ${{ inputs.pack-path }}; do
+              dotnet pack "$project" -c Release --no-build --output ./packages
+            done
+          elif [ -n "${{ inputs.project-path }}" ]; then
+            for project in ${{ inputs.project-path }}; do
+              dotnet pack "$project" -c Release --no-build --output ./packages
+            done
+          else
+            dotnet pack -c Release --no-build --output ./packages
+          fi
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
