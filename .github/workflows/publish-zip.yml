@@ -43,7 +43,10 @@ jobs:
 
   build:
     needs: prepare-description
+
+    # Run this job even if prepare-description fails
     if: always()
+
     name: Build (${{ matrix.runtime }})
     strategy:
       matrix:
