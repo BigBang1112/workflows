@@ -143,7 +143,7 @@ jobs:
 
       - name: Upload packages to GitHub Release
         if: inputs.upload-to-release && github.event_name == 'release'
-        run: gh release upload ${{ github.ref_name }} "./packages/${PACKAGE_PREFIX}*.nupkg" --repo ${{ github.repository }}
+        run: gh release upload ${{ github.ref_name }} "./packages/"${PACKAGE_PREFIX}*.nupkg --repo ${{ github.repository }}
 
   finalize:
     needs: [build, publish]
