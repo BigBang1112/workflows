@@ -98,7 +98,7 @@ jobs:
       - name: Pack
         run: |
           for project in ${{ inputs.pack-path != '' && inputs.pack-path || inputs.project-path != '' && inputs.project-path || '.' }}; do
-            dotnet pack "$project" -c Release --no-build --output ./packages
+            dotnet pack "$project" -c Release --output ./packages
           done
 
       - name: Upload Artifacts
