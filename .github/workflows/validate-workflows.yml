@@ -1,0 +1,17 @@
+name: Validate Workflows
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/*.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: action-validator
+        uses: mpalmer/action-validator@c994f427b7c42cd5ecb1bc9315cb91c3d7d72e3d
+        with:
+          version: latest
