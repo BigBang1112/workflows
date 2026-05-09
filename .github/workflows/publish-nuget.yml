@@ -27,6 +27,10 @@ on:
         description: Additional workloads to install (e.g. wasm-tools)
         type: string
         default: ""
+      enable-tests:
+        description: Run tests
+        type: boolean
+        default: true
       enable-coverage:
         description: Generate and publish code coverage summary
         type: boolean
@@ -92,6 +96,7 @@ jobs:
           fi
 
       - name: Test
+        if: inputs.enable-tests
         run: |
           if [ -n "${{ inputs.test-path }}" ]; then
             for project in ${{ inputs.test-path }}; do
