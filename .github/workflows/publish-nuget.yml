@@ -114,21 +114,27 @@ jobs:
         if: inputs.upload-to-release && github.event_name == 'release'
         run: gh release upload ${{ github.ref_name }} "./packages/${PACKAGE_PREFIX}*.nupkg" --repo ${{ github.repository }}
 
-  finalize-description:
-    needs: publish
+  finalize:
+    needs: [build, publish]
 
-    # Run this job even if build/publish fails so we can remove the "please wait..." text from the release
+    # Run this job even if package fails so we can update the release description,
+    # or to clean up the release if build fails
     if: always() && github.event_name == 'release'
 
     runs-on: ubuntu-latest
-    name: Finalize release description
+    name: Finalize release
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_BODY: ${{ github.event.release.body }}
 
     steps:
+      - name: Delete release and tag on build failure
+        if: needs.build.result == 'failure' || needs.build.result == 'cancelled'
+        run: gh release delete ${{ github.ref_name }} --repo ${{ github.repository }} --yes --cleanup-tag
+
       - name: Set final release information
+        if: needs.build.result != 'failure' && needs.build.result != 'cancelled'
         run: |
           if [ "${{ needs.publish.result }}" == "success" ]; then
             STATUS_MSG="Assets were automatically generated using the [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})."

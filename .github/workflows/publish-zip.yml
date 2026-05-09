@@ -117,7 +117,12 @@ jobs:
       RELEASE_BODY: ${{ github.event.release.body }}
 
     steps:
+      - name: Delete release and tag on build failure
+        if: needs.build.result == 'failure' || needs.build.result == 'cancelled'
+        run: gh release delete ${{ github.ref_name }} --repo ${{ github.repository }} --yes --cleanup-tag
+
       - name: Set final release information
+        if: needs.build.result != 'failure' && needs.build.result != 'cancelled'
         run: |
           if [ "${{ needs.package.result }}" == "success" ]; then
             STATUS_MSG="Assets were automatically generated using the [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})."
