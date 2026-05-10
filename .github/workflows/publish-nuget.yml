@@ -43,12 +43,23 @@ on:
         description: Publish packages to GitHub Packages
         type: boolean
         default: true
+      push-to-custom-feeds:
+        description: Publish packages to custom NuGet feeds (requires custom-feed-urls and CUSTOM_FEED_API_KEYS)
+        type: boolean
+        default: false
+      custom-feed-urls:
+        description: Newline-separated list of custom NuGet feed source URLs to push packages to
+        type: string
+        default: ""
       upload-to-release:
         description: Upload packages to the GitHub Release
         type: boolean
         default: true
     secrets:
       NUGET_API_KEY:
+        required: false
+      CUSTOM_FEED_API_KEYS:
+        description: Newline-separated list of API keys matching the order of custom-feed-urls
         required: false
 
 permissions:
@@ -139,7 +150,7 @@ jobs:
   publish:
     needs: build
     name: Publish Packages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
 
     if: github.event_name != 'workflow_dispatch'
 
@@ -162,6 +173,22 @@ jobs:
         if: inputs.push-to-github
         run: dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k ${{ secrets.GITHUB_TOKEN }} -s https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --skip-duplicate
 
+      - name: Publish packages to custom feeds
+        if: inputs.push-to-custom-feeds && inputs.custom-feed-urls != ''
+        env:
+          CUSTOM_FEED_URLS: ${{ inputs.custom-feed-urls }}
+          CUSTOM_FEED_API_KEYS: ${{ secrets.CUSTOM_FEED_API_KEYS }}
+        run: |
+          mapfile -t URLS <<< "$CUSTOM_FEED_URLS"
+          mapfile -t KEYS <<< "$CUSTOM_FEED_API_KEYS"
+          for i in "${!URLS[@]}"; do
+            url="${URLS[$i]}"
+            key="${KEYS[$i]}"
+            if [ -n "$url" ] && [ -n "$key" ]; then
+              dotnet nuget push "./packages/${PACKAGE_PREFIX}*.nupkg" -k "$key" -s "$url" --skip-duplicate
+            fi
+          done
+
       - name: Upload packages to GitHub Release
         if: inputs.upload-to-release && github.event_name == 'release'
         run: gh release upload ${{ github.ref_name }} "./packages/"${PACKAGE_PREFIX}*.nupkg --repo ${{ github.repository }}
@@ -173,7 +200,7 @@ jobs:
     # or to clean up the release if build fails
     if: always() && github.event_name == 'release'
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     name: Finalize Release
 
     env:
