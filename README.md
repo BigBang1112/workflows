@@ -84,11 +84,14 @@ Builds, tests, packs, and publishes NuGet packages to nuget.org and/or GitHub Pa
 | `enable-coverage` | Generate and publish coverage summary | `true` |
 | `push-to-nuget` | Publish to nuget.org | `true` |
 | `push-to-github` | Publish to GitHub Packages | `true` |
+| `push-to-custom-feeds` | Publish to custom NuGet feeds (requires `custom-feed-urls` and `CUSTOM_FEED_API_KEYS`) | `false` |
+| `custom-feed-urls` | Newline-separated list of custom NuGet feed source URLs | |
 | `upload-to-release` | Upload `.nupkg` files to the GitHub Release | `true` |
 
 | Secret | Description |
 |---|---|
 | `NUGET_API_KEY` | nuget.org API key |
+| `CUSTOM_FEED_API_KEYS` | Newline-separated API keys matching the order of `custom-feed-urls` |
 
 ### `publish-zip.yml` — Publish Per-Runtime ZIPs
 
