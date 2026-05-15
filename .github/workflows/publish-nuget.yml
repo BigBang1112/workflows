@@ -150,7 +150,7 @@ jobs:
   publish:
     needs: build
     name: Publish Packages
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
 
     if: github.event_name != 'workflow_dispatch'
 
