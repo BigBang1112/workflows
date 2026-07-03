@@ -172,6 +172,9 @@ jobs:
           CUSTOM_FEED_API_KEYS: ${{ secrets.CUSTOM_FEED_API_KEYS }}
         run: |
           > ./newly_pushed.txt
+          
+          # Prevents loop from running if no .nupkg files are found
+          shopt -s nullglob
 
           for pkg in ./packages/${PACKAGE_PREFIX}*.nupkg; do
             pushed=false
@@ -212,7 +215,9 @@ jobs:
             exit 0
           fi
           while IFS= read -r pkg; do
-            gh release upload ${{ github.ref_name }} "$pkg" --repo ${{ github.repository }}
+            if [[ -n "$pkg" ]]; then
+              gh release upload ${{ github.ref_name }} "$pkg" --repo ${{ github.repository }}
+            fi
           done < ./newly_pushed.txt
 
   finalize:
