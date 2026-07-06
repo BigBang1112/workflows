@@ -87,14 +87,11 @@ Builds, tests, packs, and publishes NuGet packages to nuget.org and/or GitHub Pa
 | `push-to-custom-feeds` | Publish to custom NuGet feeds (requires `custom-feed-urls` and `CUSTOM_FEED_API_KEYS`) | `false` |
 | `custom-feed-urls` | Newline-separated list of custom NuGet feed source URLs | |
 | `upload-to-release` | Upload `.nupkg` files to the GitHub Release | `true` |
-| `nuget-username` | NuGet.org username for [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC), used to obtain a short-lived API key when `NUGET_API_KEY` is not provided | |
 
 | Secret | Description |
 |---|---|
-| `NUGET_API_KEY` | nuget.org API key. Optional if `nuget-username` is set to use Trusted Publishing (OIDC) instead |
+| `NUGET_API_KEY` | nuget.org API key |
 | `CUSTOM_FEED_API_KEYS` | Newline-separated API keys matching the order of `custom-feed-urls` |
-
-Requires `id-token: write` permission on the caller when using Trusted Publishing (`nuget-username`).
 
 ### `publish-zip.yml` — Publish Per-Runtime ZIPs
 
