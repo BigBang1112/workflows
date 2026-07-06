@@ -82,16 +82,19 @@ Builds, tests, packs, and publishes NuGet packages to nuget.org and/or GitHub Pa
 | `workloads` | Comma-separated workloads to install | |
 | `enable-tests` | Run tests | `true` |
 | `enable-coverage` | Generate and publish coverage summary | `true` |
-| `push-to-nuget` | Publish to nuget.org | `true` |
+| `push-to-nuget` | Publish to NuGet.org | `true` |
 | `push-to-github` | Publish to GitHub Packages | `true` |
 | `push-to-custom-feeds` | Publish to custom NuGet feeds (requires `custom-feed-urls` and `CUSTOM_FEED_API_KEYS`) | `false` |
 | `custom-feed-urls` | Newline-separated list of custom NuGet feed source URLs | |
 | `upload-to-release` | Upload `.nupkg` files to the GitHub Release | `true` |
+| `nuget-username` | NuGet.org username for [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC), used to obtain a short-lived API key when `NUGET_API_KEY` is not provided | |
 
 | Secret | Description |
 |---|---|
-| `NUGET_API_KEY` | nuget.org API key |
+| `NUGET_API_KEY` | nuget.org API key. Optional if `nuget-username` is set to use Trusted Publishing (OIDC) instead |
 | `CUSTOM_FEED_API_KEYS` | Newline-separated API keys matching the order of `custom-feed-urls` |
+
+Requires `id-token: write` permission on the caller when using Trusted Publishing (`nuget-username`).
 
 ### `publish-zip.yml` — Publish Per-Runtime ZIPs
 
@@ -128,3 +131,7 @@ Runs [`yamlfmt`](https://github.com/google/yamlfmt) to format or lint YAML files
 | `lint` | Run in lint mode (fail if files are not formatted) | `false` |
 
 Requires `contents: write` permission when `auto-commit` is enabled.
+
+### `validate-workflows.yml` — Workflow Linting (internal)
+
+Runs [`action-validator`](https://github.com/mpalmer/action-validator) against changed workflow files on pull requests. This is a repository-maintenance workflow (not a reusable `workflow_call`) that keeps the workflows in this repo themselves valid; it isn't meant to be called from other repositories.
