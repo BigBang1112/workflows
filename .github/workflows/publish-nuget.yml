@@ -55,10 +55,6 @@ on:
         description: Upload packages to the GitHub Release
         type: boolean
         default: true
-      nuget-username:
-        description: NuGet.org username for Trusted Publishing (OIDC), used to obtain a short-lived API key when NUGET_API_KEY is not provided. See https://learn.microsoft.com/nuget/nuget-org/trusted-publishing
-        type: string
-        default: ""
     secrets:
       NUGET_API_KEY:
         required: false
@@ -158,15 +154,9 @@ jobs:
 
     if: github.event_name != 'workflow_dispatch'
 
-    permissions:
-      contents: write
-      packages: write
-      id-token: write # required for nuget.org Trusted Publishing (OIDC)
-
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PACKAGE_PREFIX: ${{ inputs.package-prefix }}
-      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
 
     steps:
       - name: Download Artifacts
@@ -175,16 +165,9 @@ jobs:
           name: nuget-packages
           path: ./packages
 
-      - name: NuGet login (Trusted Publishing OIDC)
-        if: inputs.push-to-nuget && env.NUGET_API_KEY == '' && inputs.nuget-username != ''
-        uses: NuGet/login@v1
-        id: nuget_login
-        with:
-          user: ${{ inputs.nuget-username }}
-
       - name: Publish packages to feeds
         env:
-          NUGET_API_KEY: ${{ env.NUGET_API_KEY || steps.nuget_login.outputs.NUGET_API_KEY }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
           CUSTOM_FEED_URLS: ${{ inputs.custom-feed-urls }}
           CUSTOM_FEED_API_KEYS: ${{ secrets.CUSTOM_FEED_API_KEYS }}
         run: |
