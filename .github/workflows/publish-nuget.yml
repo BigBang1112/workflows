@@ -156,8 +156,6 @@ jobs:
     name: Publish Packages
     runs-on: ubuntu-latest
 
-    if: github.event_name != 'workflow_dispatch'
-
     permissions:
       contents: write
       packages: write
@@ -182,6 +180,7 @@ jobs:
           user: ${{ inputs.nuget-username }}
 
       - name: Publish packages to feeds
+        if: github.event_name != 'workflow_dispatch'
         env:
           NUGET_API_KEY: ${{ env.NUGET_API_KEY || steps.nuget_login.outputs.NUGET_API_KEY }}
           CUSTOM_FEED_URLS: ${{ inputs.custom-feed-urls }}
