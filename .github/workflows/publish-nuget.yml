@@ -161,7 +161,6 @@ jobs:
     permissions:
       contents: write
       packages: write
-      id-token: write # required for nuget.org Trusted Publishing (OIDC)
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
