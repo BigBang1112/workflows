@@ -117,11 +117,11 @@ Publishes a .NET project for multiple runtimes, merges all outputs into a single
 |---|---|---|
 | `project` | *(required)* Project name/path to publish | |
 | `zip-name` | *(required)* Output zip name without extension | |
+| `zip-output-dir` | Directory inside the zip to place the merged output under (e.g. `MyPlugin`). Leave empty to place the output at the root of the zip. | |
+| `zip-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). Patterns containing `/` match the relative path, others match the file name. | |
 | `matrix` | JSON array of `{os, runtime, executable-extension}` objects | `win-x64` + `linux-x64` |
 | `dotnet-version` | .NET version | `latest` |
 | `artifact-folder` | Intermediate merge folder name | `Plugin` |
-| `zip-output-dir` | Directory inside the zip to place the merged output under (e.g. `MyPlugin`). Leave empty to place the output at the root of the zip. | |
-| `zip-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). Patterns containing `/` match the relative path, others match the file name. | |
 
 ### `yml-formatter.yml` — YAML Formatter
 
