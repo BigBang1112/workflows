@@ -427,7 +427,6 @@ jobs:
           {
             echo "## ${TAG}"
             if [ -n "$TOP_LINES" ]; then
-              echo
               echo "$TOP_LINES"
             fi
             echo
@@ -438,7 +437,6 @@ jobs:
               echo "NuGet: [Package Link](https://www.nuget.org/packages/${MAIN_ID}/${MAIN_VERSION})"
             fi
             if [ -n "$BOTTOM_LINES" ]; then
-              echo
               echo "$BOTTOM_LINES"
             fi
           } > discord_message.md
