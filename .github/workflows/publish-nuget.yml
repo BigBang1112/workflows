@@ -59,11 +59,22 @@ on:
         description: NuGet.org username for Trusted Publishing (OIDC), used to obtain a short-lived API key when NUGET_API_KEY is not provided. See https://learn.microsoft.com/nuget/nuget-org/trusted-publishing
         type: string
         default: ""
+      discord-top-lines:
+        description: Newline-separated lines inserted below the heading, before the changelog, in the Discord message. Ignored if the Discord webhook secret isn't set.
+        type: string
+        default: ""
+      discord-bottom-lines:
+        description: Newline-separated lines appended at the very end of the Discord message. Ignored if the Discord webhook secret isn't set.
+        type: string
+        default: ""
     secrets:
       NUGET_API_KEY:
         required: false
       CUSTOM_FEED_API_KEYS:
         description: Newline-separated list of API keys matching the order of custom-feed-urls
+        required: false
+      DISCORD_WEBHOOK_URL:
+        description: Discord webhook URL. When set, the release notes are posted to it, split to respect Discord's per-message character limit.
         required: false
 
 permissions:
@@ -160,6 +171,11 @@ jobs:
       contents: write
       packages: write
 
+    outputs:
+      has-new: ${{ steps.notify.outputs.has-new }}
+      main-id: ${{ steps.notify.outputs.main-id }}
+      main-version: ${{ steps.notify.outputs.main-version }}
+
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PACKAGE_PREFIX: ${{ inputs.package-prefix }}
@@ -222,6 +238,42 @@ jobs:
             [[ "$pushed" == "true" ]] && echo "$pkg" >> ./newly_pushed.txt
           done
 
+      - name: Resolve main package for notifications
+        id: notify
+        run: |
+          declare -A pkg_versions
+          packages=()
+
+          if [[ -s ./newly_pushed.txt ]]; then
+            while IFS= read -r pkg; do
+              if [[ -n "$pkg" ]]; then
+                filename=$(basename "$pkg")
+                # Extract SemVer version and package name
+                version=$(echo "$filename" | grep -oP '\d+\.\d+\.\d+.*(?=\.nupkg)')
+                name=$(echo "$filename" | sed -E "s/\.${version}\.nupkg$//")
+
+                pkg_versions["$name"]="$version"
+                packages+=("$name")
+              fi
+            done < ./newly_pushed.txt
+          fi
+
+          if [[ "${#packages[@]}" -eq 0 ]]; then
+            echo "has-new=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Picks the newly pushed package with the highest (semver) version
+          main_pkg=$(
+            for name in "${packages[@]}"; do
+              printf '%s|%s\n' "${pkg_versions[$name]}" "$name"
+            done | sort -t'|' -k1,1 -V | tail -n 1 | cut -d'|' -f2
+          )
+
+          echo "has-new=true" >> "$GITHUB_OUTPUT"
+          echo "main-id=$main_pkg" >> "$GITHUB_OUTPUT"
+          echo "main-version=${pkg_versions[$main_pkg]}" >> "$GITHUB_OUTPUT"
+
       - name: Upload packages to GitHub Release
         if: inputs.upload-to-release && github.event_name == 'release'
         run: |
@@ -234,6 +286,76 @@ jobs:
               gh release upload ${{ github.ref_name }} "$pkg" --repo ${{ github.repository }}
             fi
           done < ./newly_pushed.txt
+
+  discord:
+    needs: [build, publish]
+    if: always() && github.event_name == 'release' && needs.publish.result == 'success' && needs.publish.outputs.has-new == 'true'
+    name: Notify Discord
+    runs-on: ubuntu-slim
+
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      RELEASE_BODY: ${{ github.event.release.body }}
+
+    steps:
+      - name: Send announcement to Discord
+        if: env.DISCORD_WEBHOOK_URL != ''
+        env:
+          TOP_LINES: ${{ inputs.discord-top-lines }}
+          BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}
+          TAG: ${{ github.ref_name }}
+          MAIN_ID: ${{ needs.publish.outputs.main-id }}
+          MAIN_VERSION: ${{ needs.publish.outputs.main-version }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          PUSH_TO_NUGET: ${{ inputs.push-to-nuget }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## ${TAG}"
+            if [ -n "$TOP_LINES" ]; then
+              echo "$TOP_LINES"
+            fi
+            echo
+            echo "$RELEASE_BODY"
+            echo
+            echo "GitHub: [Release Link](${RELEASE_URL})"
+            if [ "$PUSH_TO_NUGET" = "true" ]; then
+              echo "NuGet: [Package Link](https://www.nuget.org/packages/${MAIN_ID}/${MAIN_VERSION})"
+            fi
+            if [ -n "$BOTTOM_LINES" ]; then
+              echo "$BOTTOM_LINES"
+            fi
+          } > discord_message.md
+
+          # Split into <=2000 char chunks, only breaking on line boundaries.
+          LIMIT=2000
+          CONTENT="$(cat discord_message.md)"
+          i=0
+          while [ -n "$CONTENT" ]; do
+            if [ "${#CONTENT}" -le "$LIMIT" ]; then
+              CHUNK="$CONTENT"
+              CONTENT=""
+            else
+              HEAD="${CONTENT:0:$LIMIT}"
+              CUT=$(printf '%s' "$HEAD" | grep -bo $'\n' | tail -1 | cut -d: -f1)
+              if [ -z "$CUT" ]; then
+                CUT=$LIMIT
+                CHUNK="${CONTENT:0:$CUT}"
+                CONTENT="${CONTENT:$CUT}"
+              else
+                CHUNK="${CONTENT:0:$CUT}"
+                CONTENT="${CONTENT:$((CUT+1))}"
+              fi
+            fi
+            printf '%s' "$CHUNK" > "chunk_$(printf '%03d' "$i").md"
+            i=$((i+1))
+          done
+
+          for f in chunk_*.md; do
+            PAYLOAD=$(jq -Rs '{content: .}' < "$f")
+            curl -fsSL -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
+          done
 
   finalize:
     needs: [build, publish]

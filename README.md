@@ -88,11 +88,14 @@ Builds, tests, packs, and publishes NuGet packages to nuget.org and/or GitHub Pa
 | `custom-feed-urls` | Newline-separated list of custom NuGet feed source URLs | |
 | `upload-to-release` | Upload `.nupkg` files to the GitHub Release | `true` |
 | `nuget-username` | NuGet.org username for [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC), used to obtain a short-lived API key when `NUGET_API_KEY` is not provided | |
+| `discord-top-lines` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message | |
+| `discord-bottom-lines` | Newline-separated lines appended at the very end of the Discord message | |
 
 | Secret | Description |
 |---|---|
 | `NUGET_API_KEY` | nuget.org API key. Optional if `nuget-username` is set to use Trusted Publishing (OIDC) instead |
 | `CUSTOM_FEED_API_KEYS` | Newline-separated API keys matching the order of `custom-feed-urls` |
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL. When set and at least one package was newly pushed, the release's notes are posted to it (heading + optional top lines + release body + GitHub/NuGet links + optional bottom lines), split to respect Discord's per-message character limit without breaking mid-line |
 
 Requires `id-token: write` permission on the caller when using Trusted Publishing (`nuget-username`).
 
