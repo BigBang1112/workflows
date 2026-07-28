@@ -173,9 +173,9 @@ jobs:
 
           for csproj in "${PROJECTS[@]}"; do
             PROPS=$(dotnet msbuild "$csproj" -nologo -getProperty:Version,VersionPrefix 2>/dev/null) || PROPS='{}'
-            VERSION=$(echo "$PROPS" | jq -r '.Properties.Version // empty')
+            VERSION=$(echo "$PROPS" | jq -r '.Properties.VersionPrefix // empty')
             if [ -z "$VERSION" ]; then
-              VERSION=$(echo "$PROPS" | jq -r '.Properties.VersionPrefix // empty')
+              VERSION=$(echo "$PROPS" | jq -r '.Properties.Version // empty')
             fi
             [ -z "$VERSION" ] && continue
 
