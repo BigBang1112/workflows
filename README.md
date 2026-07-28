@@ -96,6 +96,43 @@ Builds, tests, packs, and publishes NuGet packages to nuget.org and/or GitHub Pa
 
 Requires `id-token: write` permission on the caller when using Trusted Publishing (`nuget-username`).
 
+### `publish-nuget-immutable.yml` — Publish NuGet Packages (Immutable Release)
+
+Builds, tests, and packs .NET projects like `publish-nuget.yml`. Whenever at least one package is newly pushed, the workflow creates a single GitHub Release (with tag) carrying all of the newly pushed package assets at once, as required by repositories with immutable releases enabled.
+
+During the build, each discovered project's `[project-folder]/Changelog/v[Version_or_VersionPrefix].md` is collected into an artifact (named after the package, assumed to match its project folder name). These are stacked into the release notes: the main project's changelog first, then each other newly-pushed project's changelog under a `### [Package Name] [Version]` heading. The main project is either specified via `main-project` or automatically resolved to the newly-pushed package with the highest (semver) version, which also determines the release tag (`v[version]`).
+
+If `DISCORD_WEBHOOK_URL` is set, the same changelog (without the assets note) is posted to Discord once the release is created, prefixed with a heading and optional top lines, followed by a GitHub release link, a NuGet.org package link (if `push-to-nuget` is enabled), and optional bottom lines, split across multiple messages if needed to respect Discord's 2000-character limit without breaking mid-line.
+
+| Input | Description | Default |
+|---|---|---|
+| `package-prefix` | Filter packages by prefix (e.g. `MyCompany.`) | |
+| `project-path` | Path(s) to build, pack, and resolve changelogs for. Supports wildcards. | |
+| `test-path` | Path(s) to test projects. Supports wildcards. | |
+| `pack-path` | Path(s) to pack. Supports wildcards. Defaults to `project-path`. | |
+| `dotnet-version` | .NET version | `latest` |
+| `workloads` | Comma-separated workloads to install | |
+| `enable-tests` | Run tests | `true` |
+| `enable-coverage` | Generate and publish coverage summary | `true` |
+| `push-to-nuget` | Publish to NuGet.org | `true` |
+| `push-to-github` | Publish to GitHub Packages | `true` |
+| `push-to-custom-feeds` | Publish to custom NuGet feeds (requires `custom-feed-urls` and `CUSTOM_FEED_API_KEYS`) | `false` |
+| `custom-feed-urls` | Newline-separated list of custom NuGet feed source URLs | |
+| `upload-to-release` | Reserved; not currently used (all newly pushed packages are always attached to the release) | `true` |
+| `nuget-username` | NuGet.org username for [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC), used to obtain a short-lived API key when `NUGET_API_KEY` is not provided | |
+| `main-project` | Package name of the main project (assumed to match its project folder name), used for the release tag/version and top of the changelog | Newly pushed package with the highest version |
+| `create-release` | Create a GitHub Release (with tag) from the newly pushed packages | `true` |
+| `discord-top-lines` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message | |
+| `discord-bottom-lines` | Newline-separated lines appended at the very end of the Discord message | |
+
+| Secret | Description |
+|---|---|
+| `NUGET_API_KEY` | nuget.org API key. Optional if `nuget-username` is set to use Trusted Publishing (OIDC) instead |
+| `CUSTOM_FEED_API_KEYS` | Newline-separated API keys matching the order of `custom-feed-urls` |
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL. When set, the release changelog is posted to it after the release is created, split to respect Discord's per-message character limit without breaking mid-line |
+
+Requires `id-token: write` permission on the caller when using Trusted Publishing (`nuget-username`).
+
 ### `publish-zip.yml` — Publish Per-Runtime ZIPs
 
 Publishes a .NET project for multiple runtimes, zips each output separately, computes a SHA256 checksum per zip (written to the job summary), and uploads all zips to the GitHub Release.

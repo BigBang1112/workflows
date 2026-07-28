@@ -145,7 +145,7 @@ jobs:
             dotnet pack -c Release --no-build --output ./packages
           fi
 
-      - name: Upload Artifacts
+      - name: Upload package artifacts
         uses: actions/upload-artifact@v7
         with:
           name: nuget-packages
@@ -166,7 +166,7 @@ jobs:
       NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
 
     steps:
-      - name: Download Artifacts
+      - name: Download package artifacts
         uses: actions/download-artifact@v8
         with:
           name: nuget-packages
