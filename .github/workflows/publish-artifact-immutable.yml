@@ -1,4 +1,4 @@
-name: Publish Release Immutable (Split ZIP)
+name: Publish Artifact (Immutable)
 
 on:
   workflow_call:

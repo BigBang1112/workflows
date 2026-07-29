@@ -1,4 +1,4 @@
-name: Publish Release (Combined ZIP)
+name: Publish Artifact (Combined)
 
 on:
   workflow_call:

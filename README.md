@@ -136,7 +136,7 @@ If `DISCORD_WEBHOOK_URL` is set, the same changelog (without the assets note) is
 
 Requires `id-token: write` permission on the caller when using Trusted Publishing (`nuget-username`).
 
-### `publish-zip.yml` — Publish Per-Runtime ZIPs
+### `publish-artifact.yml` — Publish Artifacts
 
 Publishes a .NET project for multiple runtimes, zips each output separately, computes a SHA256 checksum per zip (written to the job summary), and uploads all zips to the GitHub Release.
 
@@ -149,7 +149,7 @@ Publishes a .NET project for multiple runtimes, zips each output separately, com
 | `build-matrix` | JSON array of `{os, runtime}` objects | `[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]` |
 | `dotnet-version` | .NET version to use | `latest` |
 
-### `publish-zip-immutable.yml` — Publish Per-Runtime ZIPs (Immutable Release)
+### `publish-artifact-immutable.yml` — Publish Artifacts (Immutable Release)
 
 Publishes a .NET project for multiple runtimes and creates a GitHub Release. This workflow zips each runtime output separately and attaches all of them to a single release. It will also post a Discord notification.
 
@@ -169,7 +169,7 @@ Publishes a .NET project for multiple runtimes and creates a GitHub Release. Thi
 |---|---|
 | `DISCORD_WEBHOOK_URL` | Discord webhook URL. |
 
-### `publish-zip-combined.yml` — Publish Combined ZIP
+### `publish-artifact-combined.yml` — Publish Combined Artifact
 
 Publishes a .NET project for multiple runtimes, merges all outputs into a single zip, computes its SHA256 (written to the job summary), and uploads it to the GitHub Release.
 
@@ -183,7 +183,7 @@ Publishes a .NET project for multiple runtimes, merges all outputs into a single
 | `dotnet-version` | .NET version to use | `latest` |
 | `artifact-folder` | Intermediate folder name used when merging build artifacts | `Plugin` |
 
-### `publish-zip-combined-immutable.yml` — Publish Combined ZIP (Immutable Release)
+### `publish-artifact-combined-immutable.yml` — Publish Combined Artifact (Immutable Release)
 
 Publishes a .NET project for multiple runtimes and creates a GitHub Release. This workflow merges all runtime outputs into a single zip file and attaches it to a release. It will also post a Discord notification.
 
