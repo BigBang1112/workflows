@@ -7,19 +7,19 @@ on:
         description: Path to the project file (e.g. src/MyApp/MyApp.csproj) to extract version and build from.
         type: string
         required: true
-      zip-name:
-        description: Prefix for the output zip file names (e.g. MyApp)
+      artifact-name:
+        description: Base name for the generated zip files (e.g. MyApp)
         type: string
         required: true
-      zip-output-dir:
+      artifact-root:
         description: Directory inside the zip to place the published output under (e.g. MyApp). Leave empty for root.
         type: string
         default: ''
-      zip-ignore:
+      artifact-ignore:
         description: Newline-separated list of file patterns to exclude from the zip (e.g. *.pdb).
         type: string
         default: ''
-      matrix:
+      build-matrix:
         description: JSON array of {os, runtime} objects
         type: string
         default: '[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]'
@@ -27,15 +27,15 @@ on:
         description: .NET version to use
         type: string
         default: latest
-      create-release:
+      publish-release:
         description: Create a GitHub Release (with tag) from the newly built ZIPs
         type: boolean
         default: true
-      discord-top-lines:
+      discord-description:
         description: Newline-separated lines inserted below the heading, before the changelog, in the Discord message.
         type: string
         default: ""
-      discord-bottom-lines:
+      discord-footer:
         description: Newline-separated lines appended at the very end of the Discord message.
         type: string
         default: ""
@@ -88,7 +88,7 @@ jobs:
     name: Build (${{ matrix.runtime }})
     strategy:
       matrix:
-        include: ${{ fromJson(inputs.matrix) }}
+        include: ${{ fromJson(inputs.build-matrix) }}
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -100,10 +100,10 @@ jobs:
           dotnet-version: ${{ inputs.dotnet-version }}
 
       - name: Publish ${{ matrix.runtime }}
-        run: dotnet publish ${{ inputs.project }} -c Release -r ${{ matrix.runtime }} -o ${{ inputs.zip-output-dir != '' && format('./publish/{0}', inputs.zip-output-dir) || './publish' }}
+        run: dotnet publish ${{ inputs.project }} -c Release -r ${{ matrix.runtime }} -o ${{ inputs.artifact-root != '' && format('./publish/{0}', inputs.artifact-root) || './publish' }}
 
       - name: Remove ignored files
-        if: inputs.zip-ignore != ''
+        if: inputs.artifact-ignore != ''
         shell: bash
         run: |
           while IFS= read -r pattern; do
@@ -114,26 +114,26 @@ jobs:
             else
               find publish -type f -name "$pattern" -delete
             fi
-          done <<< "${{ inputs.zip-ignore }}"
+          done <<< "${{ inputs.artifact-ignore }}"
 
       - name: Zip (Linux/Mac)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           cd publish
-          zip -r "../${{ inputs.zip-name }}.${{ needs.metadata.outputs.tag }}.${{ matrix.runtime }}.zip" .
+          zip -r "../${{ inputs.artifact-name }}.${{ needs.metadata.outputs.tag }}.${{ matrix.runtime }}.zip" .
           cd ..
 
       - name: Zip (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path "publish\*" -DestinationPath "${{ inputs.zip-name }}.${{ needs.metadata.outputs.tag }}.${{ matrix.runtime }}.zip"
+        run: Compress-Archive -Path "publish\*" -DestinationPath "${{ inputs.artifact-name }}.${{ needs.metadata.outputs.tag }}.${{ matrix.runtime }}.zip"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
           name: build-${{ matrix.runtime }}
-          path: ${{ inputs.zip-name }}.${{ needs.metadata.outputs.tag }}.${{ matrix.runtime }}.zip
+          path: ${{ inputs.artifact-name }}.${{ needs.metadata.outputs.tag }}.${{ matrix.runtime }}.zip
 
   publish:
     needs: [metadata, build]
@@ -184,7 +184,7 @@ jobs:
 
       - name: Create GitHub Release
         id: create_release
-        if: inputs.create-release == 'true'
+        if: inputs.publish-release == 'true'
         run: |
           URL=$(gh release create "${{ needs.metadata.outputs.tag }}" \
             ./zips/*.zip \
@@ -196,7 +196,7 @@ jobs:
 
   discord:
     needs: [metadata, publish]
-    if: always() && needs.publish.result == 'success' && inputs.create-release == 'true'
+    if: always() && needs.publish.result == 'success' && inputs.publish-release == 'true'
     name: Notify Discord
     runs-on: ubuntu-slim
 
@@ -214,8 +214,8 @@ jobs:
       - name: Send announcement to Discord
         if: env.DISCORD_WEBHOOK_URL != ''
         env:
-          TOP_LINES: ${{ inputs.discord-top-lines }}
-          BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}
+          TOP_LINES: ${{ inputs.discord-description }}
+          BOTTOM_LINES: ${{ inputs.discord-footer }}
           VERSION: ${{ needs.metadata.outputs.version }}
           RELEASE_URL: ${{ needs.publish.outputs.url }}
         run: |

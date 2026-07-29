@@ -7,19 +7,19 @@ on:
         description: Path to the project file (e.g. src/MyApp/MyApp.csproj) to extract version and build from.
         type: string
         required: true
-      zip-name:
+      artifact-name:
         description: Output zip file name without extension (e.g. MyPlugin)
         type: string
         required: true
-      zip-output-dir:
+      artifact-root:
         description: Directory inside the zip to place the merged output under (e.g. MyPlugin). Leave empty for root.
         type: string
         default: ''
-      zip-ignore:
+      artifact-ignore:
         description: Newline-separated list of file patterns to exclude from the zip (e.g. *.pdb).
         type: string
         default: ''
-      matrix:
+      build-matrix:
         description: JSON array of {os, runtime, executable-extension} objects
         type: string
         default: '[{"os":"windows-latest","runtime":"win-x64","executable-extension":".exe"},{"os":"ubuntu-latest","runtime":"linux-x64","executable-extension":""}]'
@@ -31,15 +31,15 @@ on:
         description: Intermediate folder name used when merging build artifacts
         type: string
         default: Plugin
-      create-release:
+      publish-release:
         description: Create a GitHub Release (with tag) from the newly built ZIP
         type: boolean
         default: true
-      discord-top-lines:
+      discord-description:
         description: Newline-separated lines inserted below the heading, before the changelog, in the Discord message.
         type: string
         default: ""
-      discord-bottom-lines:
+      discord-footer:
         description: Newline-separated lines appended at the very end of the Discord message.
         type: string
         default: ""
@@ -57,7 +57,7 @@ jobs:
     name: Build Executables
     strategy:
       matrix:
-        include: ${{ fromJson(inputs.matrix) }}
+        include: ${{ fromJson(inputs.build-matrix) }}
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -105,7 +105,7 @@ jobs:
           merge-multiple: true
 
       - name: Remove ignored files
-        if: inputs.zip-ignore != ''
+        if: inputs.artifact-ignore != ''
         shell: bash
         run: |
           while IFS= read -r pattern; do
@@ -116,26 +116,26 @@ jobs:
             else
               find ${{ inputs.artifact-folder }} -type f -name "$pattern" -delete
             fi
-          done <<< "${{ inputs.zip-ignore }}"
+          done <<< "${{ inputs.artifact-ignore }}"
 
       - name: Prepare zip output directory
-        if: inputs.zip-output-dir != '' && inputs.zip-output-dir != inputs.artifact-folder
+        if: inputs.artifact-root != '' && inputs.artifact-root != inputs.artifact-folder
         shell: bash
         run: |
-          mkdir -p "${{ inputs.zip-output-dir }}"
+          mkdir -p "${{ inputs.artifact-root }}"
           shopt -s dotglob
-          mv ${{ inputs.artifact-folder }}/* "${{ inputs.zip-output-dir }}"/
+          mv ${{ inputs.artifact-folder }}/* "${{ inputs.artifact-root }}"/
 
       - name: Zip
         shell: bash
         run: |
-          SRC_DIR="${{ inputs.zip-output-dir != '' && inputs.zip-output-dir || inputs.artifact-folder }}"
+          SRC_DIR="${{ inputs.artifact-root != '' && inputs.artifact-root || inputs.artifact-folder }}"
           if [ "$SRC_DIR" == "${{ inputs.artifact-folder }}" ]; then
             cd "$SRC_DIR"
-            zip -r "../${{ inputs.zip-name }}.zip" .
+            zip -r "../${{ inputs.artifact-name }}.zip" .
             cd ..
           else
-            zip -r "${{ inputs.zip-name }}.zip" "$SRC_DIR"
+            zip -r "${{ inputs.artifact-name }}.zip" "$SRC_DIR"
           fi
 
       - name: Extract release metadata & changelog
@@ -185,10 +185,10 @@ jobs:
 
       - name: Create GitHub Release
         id: create_release
-        if: inputs.create-release == 'true'
+        if: inputs.publish-release == 'true'
         run: |
           URL=$(gh release create "${{ steps.metadata.outputs.tag }}" \
-            "${{ inputs.zip-name }}.zip" \
+            "${{ inputs.artifact-name }}.zip" \
             --title "${{ steps.metadata.outputs.version }}" \
             --notes-file changelog_github.md \
             --repo ${{ github.repository }})
@@ -197,7 +197,7 @@ jobs:
 
   discord:
     needs: publish
-    if: always() && needs.publish.result == 'success' && inputs.create-release == 'true'
+    if: always() && needs.publish.result == 'success' && inputs.publish-release == 'true'
     name: Notify Discord
     runs-on: ubuntu-slim
 
@@ -215,8 +215,8 @@ jobs:
       - name: Send announcement to Discord
         if: env.DISCORD_WEBHOOK_URL != ''
         env:
-          TOP_LINES: ${{ inputs.discord-top-lines }}
-          BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}
+          TOP_LINES: ${{ inputs.discord-description }}
+          BOTTOM_LINES: ${{ inputs.discord-footer }}
           VERSION: ${{ needs.publish.outputs.version }}
           RELEASE_URL: ${{ needs.publish.outputs.url }}
         run: |
