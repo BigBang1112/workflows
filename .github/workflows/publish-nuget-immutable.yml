@@ -75,6 +75,10 @@ on:
         description: Newline-separated lines appended at the very end of the Discord message. Ignored if the Discord webhook secret isn't set.
         type: string
         default: ""
+      release-title-prefix:
+        description: Prefix for the GitHub Release title. Defaults to empty, which results in the release title being the version only.
+        type: string
+        default: ""
     secrets:
       NUGET_API_KEY:
         required: false
@@ -207,7 +211,7 @@ jobs:
 
     outputs:
       has-new: ${{ steps.publish.outputs.has-new }}
-      tag: ${{ steps.changelog.outputs.tag }}
+      version: ${{ steps.changelog.outputs.version }}
       main-id: ${{ steps.changelog.outputs.main-id }}
       main-version: ${{ steps.changelog.outputs.main-version }}
       url: ${{ steps.create_release.outputs.url }}
@@ -299,7 +303,7 @@ jobs:
           declare -A pkg_versions
           packages=()
 
-          # 1. Parse all newly pushed packages
+          # Parse all newly pushed packages
           while IFS= read -r pkg; do
             if [[ -n "$pkg" ]]; then
               filename=$(basename "$pkg")
@@ -312,7 +316,7 @@ jobs:
             fi
           done < ./newly_pushed.txt
 
-          # 2. Determine Main Project
+          # Determine main project
           # Falls back to the newly pushed package with the highest (semver) version
           # when main-project isn't provided or wasn't among the newly pushed packages.
           main_pkg="${{ inputs.main-project }}"
@@ -326,24 +330,24 @@ jobs:
 
           release_version="${pkg_versions[$main_pkg]}"
           release_tag="v${release_version}"
-          echo "Target Release Tag: $release_tag"
+          echo "Tag: $release_tag"
 
-          # 3. Construct the stacked Changelog (from the changelogs artifact produced during build)
-          notes_file="release_notes.md"
+          # Construct changelog
+          notes_file="changelog_github.md"
           > "$notes_file"
 
-          # -- Append Main Project Changelog --
+          # Append main project changelog
           # Assumes package name matches the changelog artifact file name (project folder name)
           main_cl_file="./changelogs/${main_pkg}.md"
 
           if [[ -f "$main_cl_file" ]]; then
             cat "$main_cl_file" >> "$notes_file"
           else
-            echo "*No changelog found for main project ${main_pkg} (v${release_version}).*" >> "$notes_file"
+            echo "*No changelog found.*" >> "$notes_file"
           fi
           echo -e "\n\n" >> "$notes_file"
 
-          # -- Append Other Projects' Changelogs --
+          # Append other projects' changelogs
           for name in "${packages[@]}"; do
             if [[ "$name" == "$main_pkg" ]]; then continue; fi
 
@@ -359,16 +363,16 @@ jobs:
             echo -e "\n" >> "$notes_file"
           done
 
-          # 4. Keep a copy of the changelog without the assets note, for Discord
+          # Keep a copy of the changelog without the assets note, for Discord
           cp "$notes_file" changelog.md
 
-          # 5. Append the automatically-generated assets note
+          # Append the automatically-generated assets note
           echo "Assets were automatically generated using the [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})." >> "$notes_file"
 
           echo "Generated stacked release notes:"
           cat "$notes_file"
 
-          echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
           echo "main-id=$main_pkg" >> "$GITHUB_OUTPUT"
           echo "main-version=$release_version" >> "$GITHUB_OUTPUT"
 
@@ -376,7 +380,7 @@ jobs:
         if: steps.publish.outputs.has-new == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: release-notes
+          name: changelog
           path: changelog.md
 
       - name: Create GitHub Release
@@ -385,10 +389,10 @@ jobs:
         run: |
           mapfile -t all_pkg_files < ./newly_pushed.txt
 
-          URL=$(gh release create "${{ steps.changelog.outputs.tag }}" \
+          URL=$(gh release create "v${{ steps.changelog.outputs.version }}" \
             "${all_pkg_files[@]}" \
-            --title "Release ${{ steps.changelog.outputs.tag }}" \
-            --notes-file release_notes.md \
+            --title "${{ inputs.release-title-prefix }} ${{ steps.changelog.outputs.version }}" \
+            --notes-file changelog_github.md \
             --repo ${{ github.repository }})
 
           echo "$URL"
@@ -404,11 +408,11 @@ jobs:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
     steps:
-      - name: Download release notes
+      - name: Download changelog artifact
         if: env.DISCORD_WEBHOOK_URL != ''
         uses: actions/download-artifact@v8
         with:
-          name: release-notes
+          name: changelog
           path: ./notes
 
       - name: Send announcement to Discord
@@ -416,7 +420,8 @@ jobs:
         env:
           TOP_LINES: ${{ inputs.discord-top-lines }}
           BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}
-          TAG: ${{ needs.publish.outputs.tag }}
+          RELEASE_TITLE_PREFIX: ${{ inputs.release-title-prefix }}
+          VERSION: ${{ needs.publish.outputs.version }}
           MAIN_ID: ${{ needs.publish.outputs.main-id }}
           MAIN_VERSION: ${{ needs.publish.outputs.main-version }}
           RELEASE_URL: ${{ needs.publish.outputs.url }}
@@ -425,7 +430,7 @@ jobs:
           set -euo pipefail
 
           {
-            echo "## ${TAG}"
+            echo "## ${RELEASE_TITLE_PREFIX} ${VERSION}"
             if [ -n "$TOP_LINES" ]; then
               echo "$TOP_LINES"
             fi
