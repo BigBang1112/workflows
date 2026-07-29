@@ -58,11 +58,10 @@ Builds and pushes Docker images to Docker Hub and/or GitHub Container Registry u
 | Input | Description | Default |
 |---|---|---|
 | `matrix` | *(required)* JSON array of `{project, image_name}` objects | |
-| `platforms` | Target platforms | `linux/amd64,linux/arm64` |
-| `dockerfile-prefix` | Path prefix to locate Dockerfiles | `Src/` |
-| `push-to-dockerhub` | Push to Docker Hub | `true` |
-| `push-to-ghcr` | Push to GitHub Container Registry | `true` |
-| `dockerhub-username` | Docker Hub username | |
+| `platforms` | Target platforms for Docker build | `linux/amd64,linux/arm64` |
+| `push-to-dockerhub` | Push images to Docker Hub | `true` |
+| `push-to-ghcr` | Push images to GitHub Container Registry | `true` |
+| `dockerhub-username` | Docker Hub username (defaults to GitHub repository owner if not provided) | `""` |
 
 | Secret | Description |
 |---|---|
@@ -127,6 +126,7 @@ If `DISCORD_WEBHOOK_URL` is set, the same changelog (without the assets note) is
 | `create-release` | Create a GitHub Release (with tag) from the newly pushed packages | `true` |
 | `discord-top-lines` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message | |
 | `discord-bottom-lines` | Newline-separated lines appended at the very end of the Discord message | |
+| `release-title-prefix` | Prefix for the GitHub Release title. Defaults to empty, which results in the release title being the version only. | `""` |
 
 | Secret | Description |
 |---|---|
@@ -142,12 +142,32 @@ Publishes a .NET project for multiple runtimes, zips each output separately, com
 
 | Input | Description | Default |
 |---|---|---|
-| `project` | *(required)* Path to the project to publish | |
-| `zip-name` | *(required)* Prefix for output zip names (e.g. `MyApp`) | |
-| `zip-output-dir` | Directory inside the zip to place the published output under (e.g. `MyApp`). Leave empty to place the output at the root of the zip. | |
-| `zip-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). Patterns containing `/` match the relative path, others match the file name. | |
-| `matrix` | JSON array of `{os, runtime}` objects | `win-x64` + `linux-x64` |
-| `dotnet-version` | .NET version | `latest` |
+| `project` | *(required)* Path to the project to publish (e.g. src/MyApp) | |
+| `artifact-name` | *(required)* Base name for the generated zip files (e.g. MyApp) | |
+| `artifact-root` | Directory inside the zip to place the published output under (e.g. MyApp). Leave empty for root. | `''` |
+| `artifact-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). Patterns containing '/' are matched against the relative path, others against the file name. | `''` |
+| `build-matrix` | JSON array of `{os, runtime}` objects | `[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]` |
+| `dotnet-version` | .NET version to use | `latest` |
+
+### `publish-zip-immutable.yml` — Publish Per-Runtime ZIPs (Immutable Release)
+
+Publishes a .NET project for multiple runtimes and creates a GitHub Release. This workflow zips each runtime output separately and attaches all of them to a single release. It will also post a Discord notification.
+
+| Input | Description | Default |
+|---|---|---|
+| `project` | *(required)* Path to the project file (e.g. src/MyApp/MyApp.csproj) to extract version and build from. | |
+| `artifact-name` | *(required)* Base name for the generated zip files (e.g. MyApp). | |
+| `artifact-root` | Directory inside the zip to place the published output under (e.g. MyApp). Leave empty for root. | `''` |
+| `artifact-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). | `''` |
+| `build-matrix` | JSON array of `{os, runtime}` objects. | `[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]` |
+| `dotnet-version` | .NET version to use. | `latest` |
+| `publish-release` | Create a GitHub Release (with tag) from the newly built ZIPs. | `true` |
+| `discord-description` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message. | `""` |
+| `discord-footer` | Newline-separated lines appended at the very end of the Discord message. | `""` |
+
+| Secret | Description |
+|---|---|
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL. |
 
 ### `publish-zip-combined.yml` — Publish Combined ZIP
 
@@ -155,13 +175,34 @@ Publishes a .NET project for multiple runtimes, merges all outputs into a single
 
 | Input | Description | Default |
 |---|---|---|
-| `project` | *(required)* Project name/path to publish | |
-| `zip-name` | *(required)* Output zip name without extension | |
-| `zip-output-dir` | Directory inside the zip to place the merged output under (e.g. `MyPlugin`). Leave empty to place the output at the root of the zip. | |
-| `zip-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). Patterns containing `/` match the relative path, others match the file name. | |
-| `matrix` | JSON array of `{os, runtime, executable-extension}` objects | `win-x64` + `linux-x64` |
-| `dotnet-version` | .NET version | `latest` |
-| `artifact-folder` | Intermediate merge folder name | `Plugin` |
+| `project` | *(required)* Path/name of the project to publish (e.g. src/MyApp or MyApp) | |
+| `artifact-name` | *(required)* Base name for the generated zip file (e.g. MyPlugin) | |
+| `artifact-root` | Directory inside the zip to place the merged output under (e.g. MyPlugin). Leave empty to place the output at the root of the zip. | `''` |
+| `artifact-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). Patterns containing '/' are matched against the relative path, others against the file name. | `''` |
+| `build-matrix` | JSON array of `{os, runtime, executable-extension}` objects | `[{"os":"windows-latest","runtime":"win-x64","executable-extension":".exe"},{"os":"ubuntu-latest","runtime":"linux-x64","executable-extension":""}]` |
+| `dotnet-version` | .NET version to use | `latest` |
+| `artifact-folder` | Intermediate folder name used when merging build artifacts | `Plugin` |
+
+### `publish-zip-combined-immutable.yml` — Publish Combined ZIP (Immutable Release)
+
+Publishes a .NET project for multiple runtimes and creates a GitHub Release. This workflow merges all runtime outputs into a single zip file and attaches it to a release. It will also post a Discord notification.
+
+| Input | Description | Default |
+|---|---|---|
+| `project` | *(required)* Path to the project file (e.g. src/MyApp/MyApp.csproj) to extract version and build from. | |
+| `artifact-name` | *(required)* Output zip file name without extension (e.g. MyPlugin). | |
+| `artifact-root` | Directory inside the zip to place the merged output under (e.g. MyPlugin). Leave empty for root. | `''` |
+| `artifact-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). | `''` |
+| `build-matrix` | JSON array of `{os, runtime, executable-extension}` objects. | `[{"os":"windows-latest","runtime":"win-x64","executable-extension":".exe"},{"os":"ubuntu-latest","runtime":"linux-x64","executable-extension":""}]` |
+| `dotnet-version` | .NET version to use. | `latest` |
+| `artifact-folder` | Intermediate folder name used when merging build artifacts. | `Plugin` |
+| `publish-release` | Create a GitHub Release (with tag) from the newly built ZIP. | `true` |
+| `discord-description` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message. | `""` |
+| `discord-footer` | Newline-separated lines appended at the very end of the Discord message. | `""` |
+
+| Secret | Description |
+|---|---|
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL. |
 
 ### `yml-formatter.yml` — YAML Formatter
 
