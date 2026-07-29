@@ -1,0 +1,266 @@
+name: Publish Release Immutable (Combined ZIP)
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: Path to the project file (e.g. src/MyApp/MyApp.csproj) to extract version and build from.
+        type: string
+        required: true
+      artifact-name:
+        description: Output zip file name without extension (e.g. MyPlugin)
+        type: string
+        required: true
+      artifact-root:
+        description: Directory inside the zip to place the merged output under (e.g. MyPlugin). Leave empty for root.
+        type: string
+        default: ''
+      artifact-ignore:
+        description: Newline-separated list of file patterns to exclude from the zip (e.g. *.pdb).
+        type: string
+        default: ''
+      build-matrix:
+        description: JSON array of {os, runtime, executable-extension} objects
+        type: string
+        default: '[{"os":"windows-latest","runtime":"win-x64","executable-extension":".exe"},{"os":"ubuntu-latest","runtime":"linux-x64","executable-extension":""}]'
+      dotnet-version:
+        description: .NET version to use
+        type: string
+        default: latest
+      artifact-folder:
+        description: Intermediate folder name used when merging build artifacts
+        type: string
+        default: Plugin
+      publish-release:
+        description: Create a GitHub Release (with tag) from the newly built ZIP
+        type: boolean
+        default: true
+      discord-description:
+        description: Newline-separated lines inserted below the heading, before the changelog, in the Discord message.
+        type: string
+        default: ""
+      discord-footer:
+        description: Newline-separated lines appended at the very end of the Discord message.
+        type: string
+        default: ""
+    secrets:
+      DISCORD_WEBHOOK_URL:
+        description: Discord webhook URL.
+        required: false
+
+permissions:
+  contents: write # important for release creation and asset upload
+  packages: read
+
+jobs:
+  build:
+    name: Build Executables
+    strategy:
+      matrix:
+        include: ${{ fromJson(inputs.build-matrix) }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Publish application
+        run: dotnet publish ${{ inputs.project }} -c Release -r ${{ matrix.runtime }} -o ./publish
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-${{ matrix.os }}
+          path: ./publish/*
+
+  publish:
+    needs: build
+    name: Package & Publish
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      version: ${{ steps.metadata.outputs.version }}
+      url: ${{ steps.create_release.outputs.url }}
+
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET (for MSBuild evaluation)
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: build-*
+          path: ./${{ inputs.artifact-folder }}
+          merge-multiple: true
+
+      - name: Remove ignored files
+        if: inputs.artifact-ignore != ''
+        shell: bash
+        run: |
+          while IFS= read -r pattern; do
+            pattern="$(echo "$pattern" | xargs)"
+            [ -z "$pattern" ] && continue
+            if [[ "$pattern" == */* ]]; then
+              find ${{ inputs.artifact-folder }} -type f -path "${{ inputs.artifact-folder }}/$pattern" -delete
+            else
+              find ${{ inputs.artifact-folder }} -type f -name "$pattern" -delete
+            fi
+          done <<< "${{ inputs.artifact-ignore }}"
+
+      - name: Prepare zip output directory
+        if: inputs.artifact-root != '' && inputs.artifact-root != inputs.artifact-folder
+        shell: bash
+        run: |
+          mkdir -p "${{ inputs.artifact-root }}"
+          shopt -s dotglob
+          mv ${{ inputs.artifact-folder }}/* "${{ inputs.artifact-root }}"/
+
+      - name: Zip
+        shell: bash
+        run: |
+          SRC_DIR="${{ inputs.artifact-root != '' && inputs.artifact-root || inputs.artifact-folder }}"
+          if [ "$SRC_DIR" == "${{ inputs.artifact-folder }}" ]; then
+            cd "$SRC_DIR"
+            zip -r "../${{ inputs.artifact-name }}.zip" .
+            cd ..
+          else
+            zip -r "${{ inputs.artifact-name }}.zip" "$SRC_DIR"
+          fi
+
+      - name: Extract release metadata & changelog
+        id: metadata
+        shell: bash
+        run: |
+          # Extract version using MSBuild dynamically
+          PROPS=$(dotnet msbuild "${{ inputs.project }}" -nologo -getProperty:Version,VersionPrefix 2>/dev/null) || PROPS='{}'
+          VERSION=$(echo "$PROPS" | jq -r '.Properties.VersionPrefix // empty')
+          if [ -z "$VERSION" ]; then
+            VERSION=$(echo "$PROPS" | jq -r '.Properties.Version // empty')
+          fi
+
+          if [ -z "$VERSION" ]; then
+            echo "Failed to extract version from ${{ inputs.project }}"
+            exit 1
+          fi
+
+          TAG="v${VERSION}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Tag: $TAG"
+
+          # Determine changelog path based on project location
+          PROJECT_DIR=$(dirname "${{ inputs.project }}")
+          CHANGELOG_FILE="${PROJECT_DIR}/Changelog/${TAG}.md"
+          NOTES_FILE="changelog_github.md"
+          > "$NOTES_FILE"
+
+          if [ -f "$CHANGELOG_FILE" ]; then
+            cat "$CHANGELOG_FILE" >> "$NOTES_FILE"
+          else
+            echo "*No changelog found.*" >> "$NOTES_FILE"
+          fi
+          
+          # Save a clean copy for Discord
+          cp "$NOTES_FILE" changelog.md
+
+          # Append the automated workflow note
+          echo -e "\n\nAssets were automatically generated using the [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})." >> "$NOTES_FILE"
+
+      - name: Upload changelog artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: changelog
+          path: changelog.md
+
+      - name: Create GitHub Release
+        id: create_release
+        if: inputs.publish-release == 'true'
+        run: |
+          URL=$(gh release create "${{ steps.metadata.outputs.tag }}" \
+            "${{ inputs.artifact-name }}.zip" \
+            --title "${{ steps.metadata.outputs.version }}" \
+            --notes-file changelog_github.md \
+            --repo ${{ github.repository }})
+
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+  discord:
+    needs: publish
+    if: always() && needs.publish.result == 'success' && inputs.publish-release == 'true'
+    name: Notify Discord
+    runs-on: ubuntu-slim
+
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+    steps:
+      - name: Download changelog artifact
+        if: env.DISCORD_WEBHOOK_URL != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: changelog
+          path: ./notes
+
+      - name: Send announcement to Discord
+        if: env.DISCORD_WEBHOOK_URL != ''
+        env:
+          TOP_LINES: ${{ inputs.discord-description }}
+          BOTTOM_LINES: ${{ inputs.discord-footer }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          RELEASE_URL: ${{ needs.publish.outputs.url }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## ${VERSION}"
+            if [ -n "$TOP_LINES" ]; then
+              echo "$TOP_LINES"
+            fi
+            echo
+            cat ./notes/changelog.md
+            echo
+            echo "GitHub: [Release Link](${RELEASE_URL})"
+            if [ -n "$BOTTOM_LINES" ]; then
+              echo "$BOTTOM_LINES"
+            fi
+          } > discord_message.md
+
+          # Split into <=2000 char chunks, only breaking on line boundaries.
+          LIMIT=2000
+          CONTENT="$(cat discord_message.md)"
+          i=0
+          while [ -n "$CONTENT" ]; do
+            if [ "${#CONTENT}" -le "$LIMIT" ]; then
+              CHUNK="$CONTENT"
+              CONTENT=""
+            else
+              HEAD="${CONTENT:0:$LIMIT}"
+              CUT=$(printf '%s' "$HEAD" | grep -bo $'\n' | tail -1 | cut -d: -f1)
+              if [ -z "$CUT" ]; then
+                CUT=$LIMIT
+                CHUNK="${CONTENT:0:$CUT}"
+                CONTENT="${CONTENT:$CUT}"
+              else
+                CHUNK="${CONTENT:0:$CUT}"
+                CONTENT="${CONTENT:$((CUT+1))}"
+              fi
+            fi
+            printf '%s' "$CHUNK" > "chunk_$(printf '%03d' "$i").md"
+            i=$((i+1))
+          done
+
+          for f in chunk_*.md; do
+            PAYLOAD=$(jq -Rs '{content: .}' < "$f")
+            curl -fsSL -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
+          done

@@ -7,19 +7,19 @@ on:
         description: Path to the project to publish (e.g. src/MyApp)
         type: string
         required: true
-      zip-name:
-        description: Prefix for the output zip file names (e.g. MyApp)
+      artifact-name:
+        description: Base name for the generated zip files (e.g. MyApp)
         type: string
         required: true
-      zip-output-dir:
+      artifact-root:
         description: Directory inside the zip to place the published output under (e.g. MyApp). Leave empty to place the output at the root of the zip.
         type: string
         default: ''
-      zip-ignore:
+      artifact-ignore:
         description: Newline-separated list of file patterns to exclude from the zip (e.g. *.pdb). Patterns containing '/' are matched against the relative path, others against the file name.
         type: string
         default: ''
-      matrix:
+      build-matrix:
         description: JSON array of {os, runtime} objects
         type: string
         default: '[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]'
@@ -58,7 +58,7 @@ jobs:
     name: Build (${{ matrix.runtime }})
     strategy:
       matrix:
-        include: ${{ fromJson(inputs.matrix) }}
+        include: ${{ fromJson(inputs.build-matrix) }}
 
     runs-on: ${{ matrix.os }}
 
@@ -71,10 +71,10 @@ jobs:
           dotnet-version: ${{ inputs.dotnet-version }}
 
       - name: Publish ${{ matrix.runtime }}
-        run: dotnet publish ${{ inputs.project }} -c Release -r ${{ matrix.runtime }} -o ${{ inputs.zip-output-dir != '' && format('./publish/{0}', inputs.zip-output-dir) || './publish' }}
+        run: dotnet publish ${{ inputs.project }} -c Release -r ${{ matrix.runtime }} -o ${{ inputs.artifact-root != '' && format('./publish/{0}', inputs.artifact-root) || './publish' }}
 
       - name: Remove ignored files
-        if: inputs.zip-ignore != ''
+        if: inputs.artifact-ignore != ''
         shell: bash
         run: |
           while IFS= read -r pattern; do
@@ -85,25 +85,25 @@ jobs:
             else
               find publish -type f -name "$pattern" -delete
             fi
-          done <<< "${{ inputs.zip-ignore }}"
+          done <<< "${{ inputs.artifact-ignore }}"
 
       - name: Zip (${{ matrix.runtime }})
         if: runner.os != 'Windows'
         shell: bash
         run: |
           cd publish
-          zip -r "../${{ inputs.zip-name }}.${{ github.ref_name }}.${{ matrix.runtime }}.zip" .
+          zip -r "../${{ inputs.artifact-name }}.${{ github.ref_name }}.${{ matrix.runtime }}.zip" .
           cd ..
 
       - name: Zip (${{ matrix.runtime }}, Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path "publish\*" -DestinationPath "${{ inputs.zip-name }}.${{ github.ref_name }}.${{ matrix.runtime }}.zip"
+        run: Compress-Archive -Path "publish\*" -DestinationPath "${{ inputs.artifact-name }}.${{ github.ref_name }}.${{ matrix.runtime }}.zip"
 
       - name: Calculate SHA256
         shell: bash
         run: |
-          ZIP_NAME="${{ inputs.zip-name }}.${{ github.ref_name }}.${{ matrix.runtime }}.zip"
+          ZIP_NAME="${{ inputs.artifact-name }}.${{ github.ref_name }}.${{ matrix.runtime }}.zip"
           HASH=$(sha256sum "$ZIP_NAME" | awk '{print $1}')
           echo "## SHA256 Checksum (${{ matrix.runtime }})" >> $GITHUB_STEP_SUMMARY
           echo "`${HASH}`" >> $GITHUB_STEP_SUMMARY
@@ -112,7 +112,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: build-${{ matrix.runtime }}
-          path: ${{ inputs.zip-name }}.${{ github.ref_name }}.${{ matrix.runtime }}.zip
+          path: ${{ inputs.artifact-name }}.${{ github.ref_name }}.${{ matrix.runtime }}.zip
 
   package:
     needs: build

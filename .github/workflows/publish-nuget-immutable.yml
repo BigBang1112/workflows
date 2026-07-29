@@ -59,12 +59,24 @@ on:
         description: NuGet.org username for Trusted Publishing (OIDC), used to obtain a short-lived API key when NUGET_API_KEY is not provided. See https://learn.microsoft.com/nuget/nuget-org/trusted-publishing
         type: string
         default: ""
+      main-project:
+        description: Package name of the main project (assumed to match its project folder name), used for the release tag/version and the top of the changelog. Defaults to the newly pushed package with the highest version.
+        type: string
+        default: ""
+      create-release:
+        description: Create a GitHub Release (with tag) from the newly pushed packages
+        type: boolean
+        default: true
       discord-top-lines:
         description: Newline-separated lines inserted below the heading, before the changelog, in the Discord message. Ignored if the Discord webhook secret isn't set.
         type: string
         default: ""
       discord-bottom-lines:
         description: Newline-separated lines appended at the very end of the Discord message. Ignored if the Discord webhook secret isn't set.
+        type: string
+        default: ""
+      release-title-prefix:
+        description: Prefix for the GitHub Release title. Defaults to empty, which results in the release title being the version only.
         type: string
         default: ""
     secrets:
@@ -74,7 +86,7 @@ on:
         description: Newline-separated list of API keys matching the order of custom-feed-urls
         required: false
       DISCORD_WEBHOOK_URL:
-        description: Discord webhook URL. When set, the release notes are posted to it, split to respect Discord's per-message character limit.
+        description: Discord webhook URL. When set, the constructed release notes are posted to it, split to respect Discord's per-message character limit.
         required: false
 
 permissions:
@@ -86,21 +98,8 @@ jobs:
     name: Build & Pack
     runs-on: ubuntu-latest
 
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      RELEASE_BODY: ${{ github.event.release.body }}
-
     steps:
       - uses: actions/checkout@v6
-
-      - name: Set release information
-        if: github.event_name == 'release'
-        continue-on-error: true
-        run: |
-          FINAL_BODY="***[Release is being automatically created, please wait...](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})***
-            
-          $RELEASE_BODY"
-          gh release edit ${{ github.ref_name }} -n "$FINAL_BODY"
 
       - name: Set DOTNET_INSTALL_DIR
         run: echo "DOTNET_INSTALL_DIR=$HOME/.dotnet" >> $GITHUB_ENV
@@ -162,19 +161,64 @@ jobs:
           name: nuget-packages
           path: ./packages/${{ inputs.package-prefix }}*.*nupkg
 
+      - name: Collect changelogs
+        run: |
+          mkdir -p ./changelogs
+
+          mapfile -t PROJECTS < <(
+            if [ -n "${{ inputs.project-path }}" ]; then
+              for pattern in ${{ inputs.project-path }}; do
+                for f in $pattern; do [ -f "$f" ] && echo "$f"; done
+              done
+            else
+              find . -name '*.csproj' -not -path '*/bin/*' -not -path '*/obj/*'
+            fi | sort -u
+          )
+
+          for csproj in "${PROJECTS[@]}"; do
+            PROPS=$(dotnet msbuild "$csproj" -nologo -getProperty:Version,VersionPrefix 2>/dev/null) || PROPS='{}'
+            VERSION=$(echo "$PROPS" | jq -r '.Properties.VersionPrefix // empty')
+            if [ -z "$VERSION" ]; then
+              VERSION=$(echo "$PROPS" | jq -r '.Properties.Version // empty')
+            fi
+            [ -z "$VERSION" ] && continue
+
+            PROJECT_DIR=$(dirname "$csproj")
+            if [ "$PROJECT_DIR" = "." ]; then
+              PROJECT_NAME=$(basename "$csproj" .csproj)
+              CHANGELOG_FILE="Changelog/v${VERSION}.md"
+            else
+              PROJECT_NAME=$(basename "$PROJECT_DIR")
+              CHANGELOG_FILE="${PROJECT_DIR}/Changelog/v${VERSION}.md"
+            fi
+
+            if [ -f "$CHANGELOG_FILE" ]; then
+              cp "$CHANGELOG_FILE" "./changelogs/${PROJECT_NAME}.md"
+            fi
+          done
+
+      - name: Upload changelog artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: changelogs
+          path: ./changelogs/*.md
+          if-no-files-found: ignore
+
   publish:
     needs: build
     name: Publish Packages
     runs-on: ubuntu-latest
 
+    outputs:
+      has-new: ${{ steps.publish.outputs.has-new }}
+      version: ${{ steps.changelog.outputs.version }}
+      main-id: ${{ steps.changelog.outputs.main-id }}
+      main-version: ${{ steps.changelog.outputs.main-version }}
+      url: ${{ steps.create_release.outputs.url }}
+
     permissions:
       contents: write
       packages: write
-
-    outputs:
-      has-new: ${{ steps.notify.outputs.has-new }}
-      main-id: ${{ steps.notify.outputs.main-id }}
-      main-version: ${{ steps.notify.outputs.main-version }}
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -188,6 +232,13 @@ jobs:
           name: nuget-packages
           path: ./packages
 
+      - name: Download changelog artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: changelogs
+          path: ./changelogs
+        continue-on-error: true
+
       - name: NuGet login (Trusted Publishing OIDC)
         if: inputs.push-to-nuget && env.NUGET_API_KEY == '' && inputs.nuget-username != ''
         uses: NuGet/login@v1
@@ -196,6 +247,7 @@ jobs:
           user: ${{ inputs.nuget-username }}
 
       - name: Publish packages to feeds
+        id: publish
         if: github.event_name != 'workflow_dispatch'
         env:
           NUGET_API_KEY: ${{ env.NUGET_API_KEY || steps.nuget_login.outputs.NUGET_API_KEY }}
@@ -238,86 +290,152 @@ jobs:
             [[ "$pushed" == "true" ]] && echo "$pkg" >> ./newly_pushed.txt
           done
 
-      - name: Resolve main package for notifications
-        id: notify
+          if [[ -s ./newly_pushed.txt ]]; then
+            echo "has-new=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-new=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build release changelog
+        id: changelog
+        if: steps.publish.outputs.has-new == 'true'
         run: |
           declare -A pkg_versions
           packages=()
 
-          if [[ -s ./newly_pushed.txt ]]; then
-            while IFS= read -r pkg; do
-              if [[ -n "$pkg" ]]; then
-                filename=$(basename "$pkg")
-                # Extract SemVer version and package name
-                version=$(echo "$filename" | grep -oP '\d+\.\d+\.\d+.*(?=\.nupkg)')
-                name=$(echo "$filename" | sed -E "s/\.${version}\.nupkg$//")
-
-                pkg_versions["$name"]="$version"
-                packages+=("$name")
-              fi
-            done < ./newly_pushed.txt
-          fi
-
-          if [[ "${#packages[@]}" -eq 0 ]]; then
-            echo "has-new=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Picks the newly pushed package with the highest (semver) version
-          main_pkg=$(
-            for name in "${packages[@]}"; do
-              printf '%s|%s\n' "${pkg_versions[$name]}" "$name"
-            done | sort -t'|' -k1,1 -V | tail -n 1 | cut -d'|' -f2
-          )
-
-          echo "has-new=true" >> "$GITHUB_OUTPUT"
-          echo "main-id=$main_pkg" >> "$GITHUB_OUTPUT"
-          echo "main-version=${pkg_versions[$main_pkg]}" >> "$GITHUB_OUTPUT"
-
-      - name: Upload packages to GitHub Release
-        if: inputs.upload-to-release && github.event_name == 'release'
-        run: |
-          if [[ ! -s ./newly_pushed.txt ]]; then
-            echo "No packages were newly pushed to any feed; skipping release upload."
-            exit 0
-          fi
+          # Parse all newly pushed packages
           while IFS= read -r pkg; do
             if [[ -n "$pkg" ]]; then
-              gh release upload ${{ github.ref_name }} "$pkg" --repo ${{ github.repository }}
+              filename=$(basename "$pkg")
+              # Extract SemVer version and package name
+              version=$(echo "$filename" | grep -oP '\d+\.\d+\.\d+.*(?=\.nupkg)')
+              name=$(echo "$filename" | sed -E "s/\.${version}\.nupkg$//")
+              
+              pkg_versions["$name"]="$version"
+              packages+=("$name")
             fi
           done < ./newly_pushed.txt
 
+          # Determine main project
+          # Falls back to the newly pushed package with the highest (semver) version
+          # when main-project isn't provided or wasn't among the newly pushed packages.
+          main_pkg="${{ inputs.main-project }}"
+          if [[ -z "$main_pkg" || -z "${pkg_versions[$main_pkg]}" ]]; then
+            main_pkg=$(
+              for name in "${packages[@]}"; do
+                printf '%s|%s\n' "${pkg_versions[$name]}" "$name"
+              done | sort -t'|' -k1,1 -V | tail -n 1 | cut -d'|' -f2
+            )
+          fi
+
+          release_version="${pkg_versions[$main_pkg]}"
+          release_tag="v${release_version}"
+          echo "Tag: $release_tag"
+
+          # Construct changelog
+          notes_file="changelog_github.md"
+          > "$notes_file"
+
+          # Append main project changelog
+          # Assumes package name matches the changelog artifact file name (project folder name)
+          main_cl_file="./changelogs/${main_pkg}.md"
+
+          if [[ -f "$main_cl_file" ]]; then
+            cat "$main_cl_file" >> "$notes_file"
+          else
+            echo "*No changelog found.*" >> "$notes_file"
+          fi
+          echo -e "\n\n" >> "$notes_file"
+
+          # Append other projects' changelogs
+          for name in "${packages[@]}"; do
+            if [[ "$name" == "$main_pkg" ]]; then continue; fi
+
+            ver="${pkg_versions[$name]}"
+            echo "### $name $ver" >> "$notes_file"
+
+            cl_file="./changelogs/${name}.md"
+            if [[ -f "$cl_file" ]]; then
+              cat "$cl_file" >> "$notes_file"
+            else
+              echo "*No changelog found.*" >> "$notes_file"
+            fi
+            echo -e "\n" >> "$notes_file"
+          done
+
+          # Keep a copy of the changelog without the assets note, for Discord
+          cp "$notes_file" changelog.md
+
+          # Append the automatically-generated assets note
+          echo "Assets were automatically generated using the [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})." >> "$notes_file"
+
+          echo "Generated stacked release notes:"
+          cat "$notes_file"
+
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
+          echo "main-id=$main_pkg" >> "$GITHUB_OUTPUT"
+          echo "main-version=$release_version" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release notes
+        if: steps.publish.outputs.has-new == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: changelog
+          path: changelog.md
+
+      - name: Create GitHub Release
+        id: create_release
+        if: inputs.create-release == 'true' && steps.publish.outputs.has-new == 'true'
+        run: |
+          mapfile -t all_pkg_files < ./newly_pushed.txt
+
+          URL=$(gh release create "v${{ steps.changelog.outputs.version }}" \
+            "${all_pkg_files[@]}" \
+            --title "${{ inputs.release-title-prefix }} ${{ steps.changelog.outputs.version }}" \
+            --notes-file changelog_github.md \
+            --repo ${{ github.repository }})
+
+          echo "$URL"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
   discord:
-    needs: [build, publish]
-    if: always() && github.event_name == 'release' && needs.publish.result == 'success' && needs.publish.outputs.has-new == 'true'
+    needs: publish
+    if: always() && needs.publish.result == 'success' && inputs.create-release == 'true' && needs.publish.outputs.has-new == 'true'
     name: Notify Discord
     runs-on: ubuntu-slim
 
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      RELEASE_BODY: ${{ github.event.release.body }}
 
     steps:
+      - name: Download changelog artifact
+        if: env.DISCORD_WEBHOOK_URL != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: changelog
+          path: ./notes
+
       - name: Send announcement to Discord
         if: env.DISCORD_WEBHOOK_URL != ''
         env:
           TOP_LINES: ${{ inputs.discord-top-lines }}
           BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}
-          TAG: ${{ github.ref_name }}
+          RELEASE_TITLE_PREFIX: ${{ inputs.release-title-prefix }}
+          VERSION: ${{ needs.publish.outputs.version }}
           MAIN_ID: ${{ needs.publish.outputs.main-id }}
           MAIN_VERSION: ${{ needs.publish.outputs.main-version }}
-          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_URL: ${{ needs.publish.outputs.url }}
           PUSH_TO_NUGET: ${{ inputs.push-to-nuget }}
         run: |
           set -euo pipefail
 
           {
-            echo "## ${TAG}"
+            echo "## ${RELEASE_TITLE_PREFIX} ${VERSION}"
             if [ -n "$TOP_LINES" ]; then
               echo "$TOP_LINES"
             fi
             echo
-            echo "$RELEASE_BODY"
+            cat ./notes/changelog.md
             echo
             echo "GitHub: [Release Link](${RELEASE_URL})"
             if [ "$PUSH_TO_NUGET" = "true" ]; then
@@ -356,37 +474,3 @@ jobs:
             PAYLOAD=$(jq -Rs '{content: .}' < "$f")
             curl -fsSL -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
           done
-
-  finalize:
-    needs: [build, publish]
-
-    # Run this job even if package fails so we can update the release description,
-    # or to clean up the release if build fails
-    if: always() && github.event_name == 'release'
-
-    runs-on: ubuntu-slim
-    name: Finalize Release
-
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      RELEASE_BODY: ${{ github.event.release.body }}
-
-    steps:
-      - name: Delete release and tag on build failure
-        if: needs.build.result == 'failure' || needs.build.result == 'cancelled'
-        run: gh release delete ${{ github.ref_name }} --repo ${{ github.repository }} --yes --cleanup-tag
-
-      - name: Set final release information
-        if: needs.build.result != 'failure' && needs.build.result != 'cancelled'
-        run: |
-          if [ "${{ needs.publish.result }}" == "success" ]; then
-            STATUS_MSG="Assets were automatically generated using the [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})."
-          else
-            STATUS_MSG=$'> [!WARNING]\n> The [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) failed. Some assets may be missing.'
-          fi
-
-          FINAL_BODY="${RELEASE_BODY}
-
-          $STATUS_MSG"
-
-          gh release edit ${{ github.ref_name }} -n "$FINAL_BODY" --repo ${{ github.repository }}

@@ -58,11 +58,10 @@ Builds and pushes Docker images to Docker Hub and/or GitHub Container Registry u
 | Input | Description | Default |
 |---|---|---|
 | `matrix` | *(required)* JSON array of `{project, image_name}` objects | |
-| `platforms` | Target platforms | `linux/amd64,linux/arm64` |
-| `dockerfile-prefix` | Path prefix to locate Dockerfiles | `Src/` |
-| `push-to-dockerhub` | Push to Docker Hub | `true` |
-| `push-to-ghcr` | Push to GitHub Container Registry | `true` |
-| `dockerhub-username` | Docker Hub username | |
+| `platforms` | Target platforms for Docker build | `linux/amd64,linux/arm64` |
+| `push-to-dockerhub` | Push images to Docker Hub | `true` |
+| `push-to-ghcr` | Push images to GitHub Container Registry | `true` |
+| `dockerhub-username` | Docker Hub username (defaults to GitHub repository owner if not provided) | `""` |
 
 | Secret | Description |
 |---|---|
@@ -88,11 +87,52 @@ Builds, tests, packs, and publishes NuGet packages to nuget.org and/or GitHub Pa
 | `custom-feed-urls` | Newline-separated list of custom NuGet feed source URLs | |
 | `upload-to-release` | Upload `.nupkg` files to the GitHub Release | `true` |
 | `nuget-username` | NuGet.org username for [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC), used to obtain a short-lived API key when `NUGET_API_KEY` is not provided | |
+| `discord-top-lines` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message | |
+| `discord-bottom-lines` | Newline-separated lines appended at the very end of the Discord message | |
 
 | Secret | Description |
 |---|---|
 | `NUGET_API_KEY` | nuget.org API key. Optional if `nuget-username` is set to use Trusted Publishing (OIDC) instead |
 | `CUSTOM_FEED_API_KEYS` | Newline-separated API keys matching the order of `custom-feed-urls` |
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL. When set and at least one package was newly pushed, the release's notes are posted to it (heading + optional top lines + release body + GitHub/NuGet links + optional bottom lines), split to respect Discord's per-message character limit without breaking mid-line |
+
+Requires `id-token: write` permission on the caller when using Trusted Publishing (`nuget-username`).
+
+### `publish-nuget-immutable.yml` — Publish NuGet Packages (Immutable Release)
+
+Builds, tests, and packs .NET projects like `publish-nuget.yml`. Whenever at least one package is newly pushed, the workflow creates a single GitHub Release (with tag) carrying all of the newly pushed package assets at once, as required by repositories with immutable releases enabled.
+
+During the build, each discovered project's `[project-folder]/Changelog/v[Version_or_VersionPrefix].md` is collected into an artifact (named after the package, assumed to match its project folder name). These are stacked into the release notes: the main project's changelog first, then each other newly-pushed project's changelog under a `### [Package Name] [Version]` heading. The main project is either specified via `main-project` or automatically resolved to the newly-pushed package with the highest (semver) version, which also determines the release tag (`v[version]`).
+
+If `DISCORD_WEBHOOK_URL` is set, the same changelog (without the assets note) is posted to Discord once the release is created, prefixed with a heading and optional top lines, followed by a GitHub release link, a NuGet.org package link (if `push-to-nuget` is enabled), and optional bottom lines, split across multiple messages if needed to respect Discord's 2000-character limit without breaking mid-line.
+
+| Input | Description | Default |
+|---|---|---|
+| `package-prefix` | Filter packages by prefix (e.g. `MyCompany.`) | |
+| `project-path` | Path(s) to build, pack, and resolve changelogs for. Supports wildcards. | |
+| `test-path` | Path(s) to test projects. Supports wildcards. | |
+| `pack-path` | Path(s) to pack. Supports wildcards. Defaults to `project-path`. | |
+| `dotnet-version` | .NET version | `latest` |
+| `workloads` | Comma-separated workloads to install | |
+| `enable-tests` | Run tests | `true` |
+| `enable-coverage` | Generate and publish coverage summary | `true` |
+| `push-to-nuget` | Publish to NuGet.org | `true` |
+| `push-to-github` | Publish to GitHub Packages | `true` |
+| `push-to-custom-feeds` | Publish to custom NuGet feeds (requires `custom-feed-urls` and `CUSTOM_FEED_API_KEYS`) | `false` |
+| `custom-feed-urls` | Newline-separated list of custom NuGet feed source URLs | |
+| `upload-to-release` | Reserved; not currently used (all newly pushed packages are always attached to the release) | `true` |
+| `nuget-username` | NuGet.org username for [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC), used to obtain a short-lived API key when `NUGET_API_KEY` is not provided | |
+| `main-project` | Package name of the main project (assumed to match its project folder name), used for the release tag/version and top of the changelog | Newly pushed package with the highest version |
+| `create-release` | Create a GitHub Release (with tag) from the newly pushed packages | `true` |
+| `discord-top-lines` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message | |
+| `discord-bottom-lines` | Newline-separated lines appended at the very end of the Discord message | |
+| `release-title-prefix` | Prefix for the GitHub Release title. Defaults to empty, which results in the release title being the version only. | `""` |
+
+| Secret | Description |
+|---|---|
+| `NUGET_API_KEY` | nuget.org API key. Optional if `nuget-username` is set to use Trusted Publishing (OIDC) instead |
+| `CUSTOM_FEED_API_KEYS` | Newline-separated API keys matching the order of `custom-feed-urls` |
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL. When set, the release changelog is posted to it after the release is created, split to respect Discord's per-message character limit without breaking mid-line |
 
 Requires `id-token: write` permission on the caller when using Trusted Publishing (`nuget-username`).
 
@@ -102,12 +142,32 @@ Publishes a .NET project for multiple runtimes, zips each output separately, com
 
 | Input | Description | Default |
 |---|---|---|
-| `project` | *(required)* Path to the project to publish | |
-| `zip-name` | *(required)* Prefix for output zip names (e.g. `MyApp`) | |
-| `zip-output-dir` | Directory inside the zip to place the published output under (e.g. `MyApp`). Leave empty to place the output at the root of the zip. | |
-| `zip-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). Patterns containing `/` match the relative path, others match the file name. | |
-| `matrix` | JSON array of `{os, runtime}` objects | `win-x64` + `linux-x64` |
-| `dotnet-version` | .NET version | `latest` |
+| `project` | *(required)* Path to the project to publish (e.g. src/MyApp) | |
+| `artifact-name` | *(required)* Base name for the generated zip files (e.g. MyApp) | |
+| `artifact-root` | Directory inside the zip to place the published output under (e.g. MyApp). Leave empty for root. | `''` |
+| `artifact-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). Patterns containing '/' are matched against the relative path, others against the file name. | `''` |
+| `build-matrix` | JSON array of `{os, runtime}` objects | `[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]` |
+| `dotnet-version` | .NET version to use | `latest` |
+
+### `publish-zip-immutable.yml` — Publish Per-Runtime ZIPs (Immutable Release)
+
+Publishes a .NET project for multiple runtimes and creates a GitHub Release. This workflow zips each runtime output separately and attaches all of them to a single release. It will also post a Discord notification.
+
+| Input | Description | Default |
+|---|---|---|
+| `project` | *(required)* Path to the project file (e.g. src/MyApp/MyApp.csproj) to extract version and build from. | |
+| `artifact-name` | *(required)* Base name for the generated zip files (e.g. MyApp). | |
+| `artifact-root` | Directory inside the zip to place the published output under (e.g. MyApp). Leave empty for root. | `''` |
+| `artifact-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). | `''` |
+| `build-matrix` | JSON array of `{os, runtime}` objects. | `[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]` |
+| `dotnet-version` | .NET version to use. | `latest` |
+| `publish-release` | Create a GitHub Release (with tag) from the newly built ZIPs. | `true` |
+| `discord-description` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message. | `""` |
+| `discord-footer` | Newline-separated lines appended at the very end of the Discord message. | `""` |
+
+| Secret | Description |
+|---|---|
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL. |
 
 ### `publish-zip-combined.yml` — Publish Combined ZIP
 
@@ -115,13 +175,34 @@ Publishes a .NET project for multiple runtimes, merges all outputs into a single
 
 | Input | Description | Default |
 |---|---|---|
-| `project` | *(required)* Project name/path to publish | |
-| `zip-name` | *(required)* Output zip name without extension | |
-| `zip-output-dir` | Directory inside the zip to place the merged output under (e.g. `MyPlugin`). Leave empty to place the output at the root of the zip. | |
-| `zip-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). Patterns containing `/` match the relative path, others match the file name. | |
-| `matrix` | JSON array of `{os, runtime, executable-extension}` objects | `win-x64` + `linux-x64` |
-| `dotnet-version` | .NET version | `latest` |
-| `artifact-folder` | Intermediate merge folder name | `Plugin` |
+| `project` | *(required)* Path/name of the project to publish (e.g. src/MyApp or MyApp) | |
+| `artifact-name` | *(required)* Base name for the generated zip file (e.g. MyPlugin) | |
+| `artifact-root` | Directory inside the zip to place the merged output under (e.g. MyPlugin). Leave empty to place the output at the root of the zip. | `''` |
+| `artifact-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). Patterns containing '/' are matched against the relative path, others against the file name. | `''` |
+| `build-matrix` | JSON array of `{os, runtime, executable-extension}` objects | `[{"os":"windows-latest","runtime":"win-x64","executable-extension":".exe"},{"os":"ubuntu-latest","runtime":"linux-x64","executable-extension":""}]` |
+| `dotnet-version` | .NET version to use | `latest` |
+| `artifact-folder` | Intermediate folder name used when merging build artifacts | `Plugin` |
+
+### `publish-zip-combined-immutable.yml` — Publish Combined ZIP (Immutable Release)
+
+Publishes a .NET project for multiple runtimes and creates a GitHub Release. This workflow merges all runtime outputs into a single zip file and attaches it to a release. It will also post a Discord notification.
+
+| Input | Description | Default |
+|---|---|---|
+| `project` | *(required)* Path to the project file (e.g. src/MyApp/MyApp.csproj) to extract version and build from. | |
+| `artifact-name` | *(required)* Output zip file name without extension (e.g. MyPlugin). | |
+| `artifact-root` | Directory inside the zip to place the merged output under (e.g. MyPlugin). Leave empty for root. | `''` |
+| `artifact-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). | `''` |
+| `build-matrix` | JSON array of `{os, runtime, executable-extension}` objects. | `[{"os":"windows-latest","runtime":"win-x64","executable-extension":".exe"},{"os":"ubuntu-latest","runtime":"linux-x64","executable-extension":""}]` |
+| `dotnet-version` | .NET version to use. | `latest` |
+| `artifact-folder` | Intermediate folder name used when merging build artifacts. | `Plugin` |
+| `publish-release` | Create a GitHub Release (with tag) from the newly built ZIP. | `true` |
+| `discord-description` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message. | `""` |
+| `discord-footer` | Newline-separated lines appended at the very end of the Discord message. | `""` |
+
+| Secret | Description |
+|---|---|
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL. |
 
 ### `yml-formatter.yml` — YAML Formatter
 
