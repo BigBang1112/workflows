@@ -1,4 +1,4 @@
-name: Publish
+name: Publish Artifact
 
 on:
   workflow_call:
