@@ -145,16 +145,60 @@ jobs:
 
       - name: Pack
         run: |
+          # Reads [project]/Changelog/v[Version].md, if present, into the PackageReleaseNotes property.
+          resolve_release_notes() {
+            local project="$1"
+            local csproj="$project"
+            [ -d "$project" ] && csproj=$(find "$project" -maxdepth 1 -name '*.csproj' | head -n 1)
+            [ -z "$csproj" ] && return
+
+            local props version
+            props=$(dotnet msbuild "$csproj" -nologo -getProperty:Version,VersionPrefix 2>/dev/null) || props='{}'
+            version=$(echo "$props" | jq -r '.Properties.VersionPrefix // empty')
+            [ -z "$version" ] && version=$(echo "$props" | jq -r '.Properties.Version // empty')
+            [ -z "$version" ] && return
+
+            local project_dir changelog_file
+            project_dir=$(dirname "$csproj")
+            if [ "$project_dir" = "." ]; then
+              changelog_file="Changelog/v${version}.md"
+            else
+              changelog_file="${project_dir}/Changelog/v${version}.md"
+            fi
+            [ -f "$changelog_file" ] || return
+
+            local notes
+            notes=$(cat "$changelog_file")
+            notes="${notes//%/%25}"
+            echo "${notes//;/%3B}"
+          }
+
+          pack_project() {
+            local project="$1"
+            shift
+
+            local notes
+            notes=$(resolve_release_notes "$project")
+
+            if [ -n "$notes" ]; then
+              dotnet pack "$project" -c Release "$@" --output ./packages -p:PackageReleaseNotes="$notes"
+            else
+              dotnet pack "$project" -c Release "$@" --output ./packages
+            fi
+          }
+
           if [ -n "${{ inputs.pack-path }}" ]; then
             for project in ${{ inputs.pack-path }}; do
-              dotnet pack "$project" -c Release --output ./packages
+              pack_project "$project"
             done
           elif [ -n "${{ inputs.project-path }}" ]; then
             for project in ${{ inputs.project-path }}; do
-              dotnet pack "$project" -c Release --no-build --output ./packages
+              pack_project "$project" --no-build
             done
           else
-            dotnet pack -c Release --no-build --output ./packages
+            while IFS= read -r project; do
+              pack_project "$project" --no-build
+            done < <(find . -name '*.csproj' -not -path '*/bin/*' -not -path '*/obj/*' | sort -u)
           fi
 
       - name: Upload package artifacts
