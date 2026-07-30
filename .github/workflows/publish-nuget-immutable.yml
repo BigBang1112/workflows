@@ -392,7 +392,7 @@ jobs:
 
       - name: Create GitHub Release
         id: create_release
-        if: inputs.create-release == 'true' && steps.publish.outputs.has-new == 'true'
+        if: inputs.create-release && steps.publish.outputs.has-new == 'true'
         run: |
           mapfile -t all_pkg_files < ./newly_pushed.txt
 
@@ -407,7 +407,7 @@ jobs:
 
   discord:
     needs: publish
-    if: always() && needs.publish.result == 'success' && inputs.create-release == 'true' && needs.publish.outputs.has-new == 'true'
+    if: always() && needs.publish.result == 'success' && inputs.create-release && needs.publish.outputs.has-new == 'true'
     name: Notify Discord
     runs-on: ubuntu-slim
 
