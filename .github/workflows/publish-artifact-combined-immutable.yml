@@ -230,7 +230,7 @@ jobs:
             echo
             cat ./notes/changelog.md
             echo
-            echo "GitHub: [Release Link](${RELEASE_URL})"
+            echo "GitHub: [Release Link](<${RELEASE_URL}>)"
             if [ -n "$BOTTOM_LINES" ]; then
               echo "$BOTTOM_LINES"
             fi
