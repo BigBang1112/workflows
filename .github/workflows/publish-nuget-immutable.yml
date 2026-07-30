@@ -92,6 +92,7 @@ on:
 permissions:
   contents: write # important for release description edit and asset upload
   packages: write
+  id-token: write # for NuGet Trusted Publishing (OIDC), see nuget-username input
 
 jobs:
   build:
@@ -219,6 +220,7 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write # for NuGet Trusted Publishing (OIDC), see nuget-username input
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

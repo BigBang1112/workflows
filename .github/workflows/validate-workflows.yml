@@ -2,6 +2,7 @@ name: Validate Workflows
 
 on:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   validate:
