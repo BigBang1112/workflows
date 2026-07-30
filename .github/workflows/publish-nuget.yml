@@ -319,9 +319,9 @@ jobs:
             echo
             echo "$RELEASE_BODY"
             echo
-            echo "GitHub: [Release Link](${RELEASE_URL})"
+            echo "GitHub: [Release Link](<${RELEASE_URL}>)"
             if [ "$PUSH_TO_NUGET" = "true" ]; then
-              echo "NuGet: [Package Link](https://www.nuget.org/packages/${MAIN_ID}/${MAIN_VERSION})"
+              echo "NuGet: [Package Link](<https://www.nuget.org/packages/${MAIN_ID}/${MAIN_VERSION}>)"
             fi
             if [ -n "$BOTTOM_LINES" ]; then
               echo "$BOTTOM_LINES"
