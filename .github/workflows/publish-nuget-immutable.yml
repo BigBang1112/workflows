@@ -144,16 +144,60 @@ jobs:
 
       - name: Pack
         run: |
+          # Reads [project]/Changelog/v[Version].md, if present, into the PackageReleaseNotes property.
+          resolve_release_notes() {
+            local project="$1"
+            local csproj="$project"
+            [ -d "$project" ] && csproj=$(find "$project" -maxdepth 1 -name '*.csproj' | head -n 1)
+            [ -z "$csproj" ] && return
+
+            local props version
+            props=$(dotnet msbuild "$csproj" -nologo -getProperty:Version,VersionPrefix 2>/dev/null) || props='{}'
+            version=$(echo "$props" | jq -r '.Properties.VersionPrefix // empty')
+            [ -z "$version" ] && version=$(echo "$props" | jq -r '.Properties.Version // empty')
+            [ -z "$version" ] && return
+
+            local project_dir changelog_file
+            project_dir=$(dirname "$csproj")
+            if [ "$project_dir" = "." ]; then
+              changelog_file="Changelog/v${version}.md"
+            else
+              changelog_file="${project_dir}/Changelog/v${version}.md"
+            fi
+            [ -f "$changelog_file" ] || return
+
+            local notes
+            notes=$(cat "$changelog_file")
+            notes="${notes//%/%25}"
+            echo "${notes//;/%3B}"
+          }
+
+          pack_project() {
+            local project="$1"
+            shift
+
+            local notes
+            notes=$(resolve_release_notes "$project")
+
+            if [ -n "$notes" ]; then
+              dotnet pack "$project" -c Release "$@" --output ./packages -p:PackageReleaseNotes="$notes"
+            else
+              dotnet pack "$project" -c Release "$@" --output ./packages
+            fi
+          }
+
           if [ -n "${{ inputs.pack-path }}" ]; then
             for project in ${{ inputs.pack-path }}; do
-              dotnet pack "$project" -c Release --output ./packages
+              pack_project "$project"
             done
           elif [ -n "${{ inputs.project-path }}" ]; then
             for project in ${{ inputs.project-path }}; do
-              dotnet pack "$project" -c Release --no-build --output ./packages
+              pack_project "$project" --no-build
             done
           else
-            dotnet pack -c Release --no-build --output ./packages
+            while IFS= read -r project; do
+              pack_project "$project" --no-build
+            done < <(find . -name '*.csproj' -not -path '*/bin/*' -not -path '*/obj/*' | sort -u)
           fi
 
       - name: Upload package artifacts
@@ -167,8 +211,16 @@ jobs:
           mkdir -p ./changelogs
 
           mapfile -t PROJECTS < <(
-            if [ -n "${{ inputs.project-path }}" ]; then
-              for pattern in ${{ inputs.project-path }}; do
+            if [ -n "${{ inputs.pack-path }}" ]; then
+              paths="${{ inputs.pack-path }}"
+            elif [ -n "${{ inputs.project-path }}" ]; then
+              paths="${{ inputs.project-path }}"
+            else
+              paths=""
+            fi
+
+            if [ -n "$paths" ]; then
+              for pattern in $paths; do
                 for f in $pattern; do
                   if [ -f "$f" ]; then
                     echo "$f"
@@ -218,18 +270,12 @@ jobs:
 
     outputs:
       has-new: ${{ steps.publish.outputs.has-new }}
-      version: ${{ steps.changelog.outputs.version }}
-      main-id: ${{ steps.changelog.outputs.main-id }}
-      main-version: ${{ steps.changelog.outputs.main-version }}
-      url: ${{ steps.create_release.outputs.url }}
 
     permissions:
-      contents: write
       packages: write
       # id-token: write # for NuGet Trusted Publishing (OIDC), see nuget-username input
 
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PACKAGE_PREFIX: ${{ inputs.package-prefix }}
       NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
 
@@ -239,13 +285,6 @@ jobs:
         with:
           name: nuget-packages
           path: ./packages
-
-      - name: Download changelog artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: changelogs
-          path: ./changelogs
-        continue-on-error: true
 
       - name: NuGet login (Trusted Publishing OIDC)
         if: inputs.push-to-nuget && env.NUGET_API_KEY == '' && inputs.nuget-username != ''
@@ -303,9 +342,53 @@ jobs:
             echo "has-new=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Upload newly-pushed list
+        uses: actions/upload-artifact@v7
+        with:
+          name: newly-pushed
+          path: ./newly_pushed.txt
+
+  release:
+    needs: publish
+    if: needs.publish.outputs.has-new == 'true'
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    outputs:
+      has-new: ${{ needs.publish.outputs.has-new }}
+      version: ${{ steps.changelog.outputs.version }}
+      main-id: ${{ steps.changelog.outputs.main-id }}
+      main-version: ${{ steps.changelog.outputs.main-version }}
+      url: ${{ steps.create_release.outputs.url }}
+
+    permissions:
+      contents: write
+
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: nuget-packages
+          path: ./packages
+
+      - name: Download changelog artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: changelogs
+          path: ./changelogs
+        continue-on-error: true
+
+      - name: Download newly-pushed list
+        uses: actions/download-artifact@v8
+        with:
+          name: newly-pushed
+          path: ./
+
       - name: Build release changelog
         id: changelog
-        if: steps.publish.outputs.has-new == 'true'
         run: |
           declare -A pkg_versions
           packages=()
@@ -384,7 +467,6 @@ jobs:
           echo "main-version=$release_version" >> "$GITHUB_OUTPUT"
 
       - name: Upload release notes
-        if: steps.publish.outputs.has-new == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: changelog
@@ -392,7 +474,7 @@ jobs:
 
       - name: Create GitHub Release
         id: create_release
-        if: inputs.create-release && steps.publish.outputs.has-new == 'true'
+        if: inputs.create-release
         run: |
           mapfile -t all_pkg_files < ./newly_pushed.txt
 
@@ -406,8 +488,8 @@ jobs:
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
   discord:
-    needs: publish
-    if: always() && needs.publish.result == 'success' && inputs.create-release && needs.publish.outputs.has-new == 'true'
+    needs: [release, publish]
+    if: always() && needs.release.result == 'success' && inputs.create-release && needs.publish.outputs.has-new == 'true'
     name: Notify Discord
     runs-on: ubuntu-slim
 
@@ -428,10 +510,10 @@ jobs:
           TOP_LINES: ${{ inputs.discord-top-lines }}
           BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}
           RELEASE_TITLE_PREFIX: ${{ inputs.release-title-prefix }}
-          VERSION: ${{ needs.publish.outputs.version }}
-          MAIN_ID: ${{ needs.publish.outputs.main-id }}
-          MAIN_VERSION: ${{ needs.publish.outputs.main-version }}
-          RELEASE_URL: ${{ needs.publish.outputs.url }}
+          VERSION: ${{ needs.release.outputs.version }}
+          MAIN_ID: ${{ needs.release.outputs.main-id }}
+          MAIN_VERSION: ${{ needs.release.outputs.main-version }}
+          RELEASE_URL: ${{ needs.release.outputs.url }}
           PUSH_TO_NUGET: ${{ inputs.push-to-nuget }}
         run: |
           set -euo pipefail
