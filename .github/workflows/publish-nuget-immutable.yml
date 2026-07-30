@@ -169,7 +169,13 @@ jobs:
           mapfile -t PROJECTS < <(
             if [ -n "${{ inputs.project-path }}" ]; then
               for pattern in ${{ inputs.project-path }}; do
-                for f in $pattern; do [ -f "$f" ] && echo "$f"; done
+                for f in $pattern; do
+                  if [ -f "$f" ]; then
+                    echo "$f"
+                  elif [ -d "$f" ]; then
+                    find "$f" -maxdepth 1 -name '*.csproj'
+                  fi
+                done
               done
             else
               find . -name '*.csproj' -not -path '*/bin/*' -not -path '*/obj/*'
@@ -250,7 +256,6 @@ jobs:
 
       - name: Publish packages to feeds
         id: publish
-        if: github.event_name != 'workflow_dispatch'
         env:
           NUGET_API_KEY: ${{ env.NUGET_API_KEY || steps.nuget_login.outputs.NUGET_API_KEY }}
           CUSTOM_FEED_URLS: ${{ inputs.custom-feed-urls }}
