@@ -106,7 +106,7 @@ jobs:
           ZIP_NAME="${{ inputs.artifact-name }}.${{ github.ref_name }}.${{ matrix.runtime }}.zip"
           HASH=$(sha256sum "$ZIP_NAME" | awk '{print $1}')
           echo "## SHA256 Checksum (${{ matrix.runtime }})" >> $GITHUB_STEP_SUMMARY
-          echo "`${HASH}`" >> $GITHUB_STEP_SUMMARY
+          echo "\`${HASH}\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
