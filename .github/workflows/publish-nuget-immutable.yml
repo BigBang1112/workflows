@@ -177,18 +177,19 @@ jobs:
 
             printf '%s.%s.nupkg\t%s\t%s\n' "$id" "$version" "$id" "$version" >> ./packages/manifest.tsv
 
-            local project_dir project_name changelog_file
+            local project_dir changelog_file
             project_dir=$(dirname "$csproj")
             if [ "$project_dir" = "." ]; then
-              project_name=$(basename "$csproj" .csproj)
               changelog_file="Changelogs/v${version}.md"
             else
-              project_name=$(basename "$project_dir")
               changelog_file="${project_dir}/Changelogs/v${version}.md"
             fi
             [ -f "$changelog_file" ] || return
 
-            cp "$changelog_file" "./changelogs/${project_name}.md"
+            # Name the copy after the package id (not the containing folder), since that's
+            # how the release job looks it up - they can differ, e.g. a template-pack project
+            # at "templates/MyCompany.Templates.csproj" with PackageId "MyCompany.Templates".
+            cp "$changelog_file" "./changelogs/${id}.md"
 
             local notes
             notes=$(cat "$changelog_file")
@@ -429,7 +430,7 @@ jobs:
           > "$notes_file"
 
           # Append main project changelog
-          # Assumes package name matches the changelog artifact file name (project folder name)
+          # Changelog artifacts are named after the package id (see resolve_project_info in Pack step)
           main_cl_file="./changelogs/${main_pkg}.md"
 
           if [[ -f "$main_cl_file" ]]; then
