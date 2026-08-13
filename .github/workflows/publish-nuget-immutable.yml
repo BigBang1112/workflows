@@ -183,6 +183,11 @@ jobs:
             local project="$1"
             shift
 
+            if [ ! -e "$project" ]; then
+              echo "::error::Pack path '$project' does not exist (check the pack-path input)."
+              exit 1
+            fi
+
             local notes
             notes=$(resolve_release_notes "$project")
 
