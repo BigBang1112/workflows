@@ -160,7 +160,7 @@ jobs:
         shell: bash
         run: |
           PROJECT_DIR=$(dirname "${{ inputs.project }}")
-          CHANGELOG_FILE="${PROJECT_DIR}/Changelog/${{ needs.metadata.outputs.tag }}.md"
+          CHANGELOG_FILE="${PROJECT_DIR}/Changelogs/${{ needs.metadata.outputs.tag }}.md"
           NOTES_FILE="changelog_github.md"
           > "$NOTES_FILE"
 
