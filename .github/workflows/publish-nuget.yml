@@ -152,10 +152,15 @@ jobs:
             [ -d "$project" ] && csproj=$(find "$project" -maxdepth 1 -name '*.csproj' | head -n 1)
             [ -z "$csproj" ] && return
 
-            local props version
-            props=$(dotnet msbuild "$csproj" -nologo -getProperty:Version,VersionPrefix 2>/dev/null) || props='{}'
+            local props version suffix
+            props=$(dotnet msbuild "$csproj" -nologo -getProperty:Version,VersionPrefix,VersionSuffix 2>/dev/null) || props='{}'
             version=$(echo "$props" | jq -r '.Properties.VersionPrefix // empty')
-            [ -z "$version" ] && version=$(echo "$props" | jq -r '.Properties.Version // empty')
+            if [ -n "$version" ]; then
+              suffix=$(echo "$props" | jq -r '.Properties.VersionSuffix // empty')
+              [ -n "$suffix" ] && version="${version}-${suffix}"
+            else
+              version=$(echo "$props" | jq -r '.Properties.Version // empty')
+            fi
             [ -z "$version" ] && return
 
             local project_dir changelog_file
@@ -176,11 +181,6 @@ jobs:
           pack_project() {
             local project="$1"
             shift
-
-            if [ ! -e "$project" ]; then
-              echo "::error::Pack path '$project' does not exist (check the pack-path input)."
-              exit 1
-            fi
 
             local notes
             notes=$(resolve_release_notes "$project")

@@ -71,7 +71,7 @@ Builds and pushes Docker images to Docker Hub and/or GitHub Container Registry u
 
 Builds, tests, packs, and publishes NuGet packages to nuget.org and/or GitHub Packages.
 
-During packing, each project's `PackageReleaseNotes` is set from its `[project-folder]/Changelogs/v[Version_or_VersionPrefix].md` file, if present.
+During packing, each project's `PackageReleaseNotes` is set from its `[project-folder]/Changelogs/v[Version].md` file, if present, where `Version` is the project's `Version` property, or `VersionPrefix` combined with `VersionSuffix` (e.g. `1.2.3-beta.1`) if set.
 
 | Input | Description | Default |
 |---|---|---|
@@ -104,7 +104,7 @@ Requires `id-token: write` permission on the caller when using Trusted Publishin
 
 Builds, tests, and packs .NET projects like `publish-nuget.yml`. Whenever at least one package is newly pushed, the workflow creates a single GitHub Release (with tag) carrying all of the newly pushed package assets at once, as required by repositories with immutable releases enabled.
 
-During the build, each discovered project's `[project-folder]/Changelogs/v[Version_or_VersionPrefix].md` is collected into an artifact (named after the package, assumed to match its project folder name). These are stacked into the release notes: the main project's changelog first, then each other newly-pushed project's changelog under a `### [Package Name] [Version]` heading. The main project is either specified via `main-project` or automatically resolved to the newly-pushed package with the highest (semver) version, which also determines the release tag (`v[version]`).
+During the build, each discovered project's `[project-folder]/Changelogs/v[Version].md` (where `Version` is the project's `Version` property, or `VersionPrefix` combined with `VersionSuffix` if set) is collected into an artifact (named after the package, assumed to match its project folder name). These are stacked into the release notes: the main project's changelog first, then each other newly-pushed project's changelog under a `### [Package Name] [Version]` heading. The main project is either specified via `main-project` or automatically resolved to the newly-pushed package with the highest (semver) version, which also determines the release tag (`v[version]`).
 
 During packing, each project's `PackageReleaseNotes` is also set from the same changelog file, if present.
 
@@ -157,6 +157,8 @@ Publishes a .NET project for multiple runtimes, zips each output separately, com
 
 Publishes a .NET project for multiple runtimes and creates a GitHub Release. This workflow zips each runtime output separately and attaches all of them to a single release. It will also post a Discord notification.
 
+The release tag/version is read from the project's `Version` property, or `VersionPrefix` combined with `VersionSuffix` if set.
+
 | Input | Description | Default |
 |---|---|---|
 | `project` | *(required)* Path to the project file (e.g. src/MyApp/MyApp.csproj) to extract version and build from. | |
@@ -190,6 +192,8 @@ Publishes a .NET project for multiple runtimes, merges all outputs into a single
 ### `publish-artifact-combined-immutable.yml` — Publish Combined Artifact (Immutable Release)
 
 Publishes a .NET project for multiple runtimes and creates a GitHub Release. This workflow merges all runtime outputs into a single zip file and attaches it to a release. It will also post a Discord notification.
+
+The release tag/version is read from the project's `Version` property, or `VersionPrefix` combined with `VersionSuffix` if set.
 
 | Input | Description | Default |
 |---|---|---|

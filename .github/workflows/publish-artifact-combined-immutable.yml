@@ -143,9 +143,12 @@ jobs:
         shell: bash
         run: |
           # Extract version using MSBuild dynamically
-          PROPS=$(dotnet msbuild "${{ inputs.project }}" -nologo -getProperty:Version,VersionPrefix 2>/dev/null) || PROPS='{}'
+          PROPS=$(dotnet msbuild "${{ inputs.project }}" -nologo -getProperty:Version,VersionPrefix,VersionSuffix 2>/dev/null) || PROPS='{}'
           VERSION=$(echo "$PROPS" | jq -r '.Properties.VersionPrefix // empty')
-          if [ -z "$VERSION" ]; then
+          if [ -n "$VERSION" ]; then
+            SUFFIX=$(echo "$PROPS" | jq -r '.Properties.VersionSuffix // empty')
+            [ -n "$SUFFIX" ] && VERSION="${VERSION}-${SUFFIX}"
+          else
             VERSION=$(echo "$PROPS" | jq -r '.Properties.Version // empty')
           fi
 
