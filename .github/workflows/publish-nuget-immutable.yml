@@ -146,7 +146,7 @@ jobs:
         run: |
           mkdir -p ./packages ./changelogs
 
-          # Reads [project]/Changelog/v[Version].md, if present, copies it to ./changelogs/<name>.md,
+          # Reads [project]/Changelogs/v[Version].md, if present, copies it to ./changelogs/<name>.md,
           # and returns its content (escaped) for the PackageReleaseNotes property.
           resolve_release_notes() {
             local project="$1"
@@ -164,10 +164,10 @@ jobs:
             project_dir=$(dirname "$csproj")
             if [ "$project_dir" = "." ]; then
               project_name=$(basename "$csproj" .csproj)
-              changelog_file="Changelog/v${version}.md"
+              changelog_file="Changelogs/v${version}.md"
             else
               project_name=$(basename "$project_dir")
-              changelog_file="${project_dir}/Changelog/v${version}.md"
+              changelog_file="${project_dir}/Changelogs/v${version}.md"
             fi
             [ -f "$changelog_file" ] || return
 
