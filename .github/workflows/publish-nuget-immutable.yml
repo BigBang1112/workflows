@@ -145,17 +145,27 @@ jobs:
       - name: Pack
         run: |
           mkdir -p ./packages ./changelogs
+          > ./packages/manifest.tsv
 
-          # Reads [project]/Changelogs/v[Version].md, if present, copies it to ./changelogs/<name>.md,
+          # Records the exact PackageId/Version of a packed project to ./packages/manifest.tsv, so the
+          # release job can look them up instead of (ambiguously) parsing them back out of the .nupkg
+          # filename - e.g. a package id ending in digits, like "ManiaPlanet3", is indistinguishable
+          # from a version prefix once concatenated as "ManiaPlanet3.1.0.0.nupkg".
+          # Also reads [project]/Changelogs/v[Version].md, if present, copies it to ./changelogs/<name>.md,
           # and returns its content (escaped) for the PackageReleaseNotes property.
-          resolve_release_notes() {
+          resolve_project_info() {
             local project="$1"
             local csproj="$project"
             [ -d "$project" ] && csproj=$(find "$project" -maxdepth 1 -name '*.csproj' | head -n 1)
             [ -z "$csproj" ] && return
 
-            local props version suffix
-            props=$(dotnet msbuild "$csproj" -nologo -getProperty:Version,VersionPrefix,VersionSuffix 2>/dev/null) || props='{}'
+            local props id version suffix
+            props=$(dotnet msbuild "$csproj" -nologo -getProperty:PackageId,AssemblyName,Version,VersionPrefix,VersionSuffix 2>/dev/null) || props='{}'
+
+            id=$(echo "$props" | jq -r '.Properties.PackageId // empty')
+            [ -z "$id" ] && id=$(echo "$props" | jq -r '.Properties.AssemblyName // empty')
+            [ -z "$id" ] && id=$(basename "$csproj" .csproj)
+
             version=$(echo "$props" | jq -r '.Properties.VersionPrefix // empty')
             if [ -n "$version" ]; then
               suffix=$(echo "$props" | jq -r '.Properties.VersionSuffix // empty')
@@ -164,6 +174,8 @@ jobs:
               version=$(echo "$props" | jq -r '.Properties.Version // empty')
             fi
             [ -z "$version" ] && return
+
+            printf '%s.%s.nupkg\t%s\t%s\n' "$id" "$version" "$id" "$version" >> ./packages/manifest.tsv
 
             local project_dir project_name changelog_file
             project_dir=$(dirname "$csproj")
@@ -189,7 +201,7 @@ jobs:
             shift
 
             local notes
-            notes=$(resolve_release_notes "$project")
+            notes=$(resolve_project_info "$project")
 
             if [ -n "$notes" ]; then
               dotnet pack "$project" -c Release "$@" --output ./packages -p:PackageReleaseNotes="$notes"
@@ -217,6 +229,12 @@ jobs:
         with:
           name: nuget-packages
           path: ./packages/${{ inputs.package-prefix }}*.*nupkg
+
+      - name: Upload package manifest artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-manifest
+          path: ./packages/manifest.tsv
 
       - name: Upload changelog artifacts
         uses: actions/upload-artifact@v7
@@ -356,6 +374,12 @@ jobs:
           path: ./changelogs
         continue-on-error: true
 
+      - name: Download package manifest artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: package-manifest
+          path: ./packages
+
       - name: Download newly-pushed list
         uses: actions/download-artifact@v8
         with:
@@ -368,14 +392,17 @@ jobs:
           declare -A pkg_versions
           packages=()
 
-          # Parse all newly pushed packages
+          # Look up each newly pushed package's exact id/version from the manifest recorded during
+          # Pack, rather than parsing the .nupkg filename (which is ambiguous when a package id ends
+          # in digits, e.g. "ManiaPlanet3.1.0.0.nupkg" could be id "ManiaPlanet3" version "1.0.0" or
+          # id "ManiaPlanet" version "3.1.0.0").
           while IFS= read -r pkg; do
             if [[ -n "$pkg" ]]; then
               filename=$(basename "$pkg")
-              # Extract SemVer version and package name
-              version=$(echo "$filename" | grep -oP '\d+\.\d+\.\d+.*(?=\.nupkg)')
-              name=$(echo "$filename" | sed -E "s/\.${version}\.nupkg$//")
-              
+              entry=$(awk -F'\t' -v f="$filename" '$1 == f { print $2 "\t" $3; exit }' ./packages/manifest.tsv)
+              name=$(cut -f1 <<< "$entry")
+              version=$(cut -f2 <<< "$entry")
+
               pkg_versions["$name"]="$version"
               packages+=("$name")
             fi
