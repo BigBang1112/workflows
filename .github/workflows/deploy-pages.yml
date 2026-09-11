@@ -23,6 +23,10 @@ on:
         description: Generate HTML coverage report and publish it to /coverage/ on the site
         type: boolean
         default: false
+      patch-base:
+        description: Patch the base href in index.html and service-worker.published.js to the repository name
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -84,9 +88,11 @@ jobs:
         run: dotnet test -c Release --collect:"XPlat Code Coverage" --results-directory ./coverage
 
       - name: Patch base href in index.html
+        if: inputs.patch-base
         run: sed -i 's/<base href="\/" \/>/<base href="\/${{ github.event.repository.name }}\/" \/>/g' ${{ inputs.project }}/wwwroot/index.html
 
       - name: Patch base in service-worker.published.js
+        if: inputs.patch-base
         run: sed -i 's/const base = "\//const base = "\/${{ github.event.repository.name }}\//g' ${{ inputs.project }}/wwwroot/service-worker.published.js
 
       - name: Publish

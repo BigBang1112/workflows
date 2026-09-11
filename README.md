@@ -39,7 +39,7 @@ Builds and tests a .NET solution across one or more OS runners with optional cod
 
 ### `deploy-pages.yml` — Deploy Blazor WASM to GitHub Pages
 
-Publishes a Blazor WebAssembly project and deploys it to GitHub Pages. Automatically patches `<base href>` and `service-worker.published.js` to the repository name.
+Publishes a Blazor WebAssembly project and deploys it to GitHub Pages. By default, patches `<base href>` and `service-worker.published.js` to the repository name.
 
 Requires `pages: write` and `id-token: write` permissions on the caller.
 
@@ -50,6 +50,7 @@ Requires `pages: write` and `id-token: write` permissions on the caller.
 | `workloads` | Comma-separated workloads to install | `wasm-tools` |
 | `enable-cache` | Cache NuGet packages | `true` |
 | `enable-coverage` | Generate HTML report at `/coverage/` on the site | `false` |
+| `patch-base` | Patch `<base href>` in `index.html` and `service-worker.published.js` to the repository name | `true` |
 
 ### `docker-publish.yml` — Publish Docker Images
 
