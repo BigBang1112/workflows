@@ -50,7 +50,7 @@ Requires `pages: write` and `id-token: write` permissions on the caller.
 | `workloads` | Comma-separated workloads to install | `wasm-tools` |
 | `enable-cache` | Cache NuGet packages | `true` |
 | `enable-coverage` | Generate HTML report at `/coverage/` on the site | `false` |
-| `patch-base-href` | Patch `<base href>` in `index.html` to the repository name | `true` |
+| `patch-base` | Patch `<base href>` in `index.html` and `service-worker.published.js` to the repository name | `true` |
 
 ### `docker-publish.yml` — Publish Docker Images
 
