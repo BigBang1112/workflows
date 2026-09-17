@@ -105,6 +105,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # A reusable workflow's normal checkout is the caller repository. Fetch the
+      # helper from the exact commit that supplied this workflow so callers do not
+      # need to copy it into their own repositories.
+      - name: Checkout publish helper
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: _publish-nuget-immutable-helper
+          sparse-checkout: .github/scripts
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
@@ -125,7 +136,7 @@ jobs:
           python-version: '3.13'
 
       - name: Test publish helper
-        run: python .github/scripts/test_publish_nuget_immutable.py
+        run: python _publish-nuget-immutable-helper/.github/scripts/test_publish_nuget_immutable.py
 
       - name: Build
         shell: bash
@@ -195,7 +206,7 @@ jobs:
               done
             done <<< "$pack_path"
           fi
-          python .github/scripts/publish_nuget_immutable.py prepare
+          python _publish-nuget-immutable-helper/.github/scripts/publish_nuget_immutable.py prepare
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v7
@@ -217,7 +228,7 @@ jobs:
           GITHUB_PACKAGES_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           CUSTOM_FEED_API_KEYS: ${{ secrets.CUSTOM_FEED_API_KEYS }}
-        run: python .github/scripts/publish_nuget_immutable.py publish
+        run: python _publish-nuget-immutable-helper/.github/scripts/publish_nuget_immutable.py publish
 
       - name: Create release from newly uploaded packages
         if: steps.publish.outputs.has-new == 'true' && inputs.create-release
@@ -227,7 +238,7 @@ jobs:
           MAIN_PROJECT: ${{ inputs.main-project }}
           UPLOAD_TO_RELEASE: ${{ inputs.upload-to-release }}
           RELEASE_TITLE_PREFIX: ${{ inputs.release-title-prefix }}
-        run: python .github/scripts/publish_nuget_immutable.py release
+        run: python _publish-nuget-immutable-helper/.github/scripts/publish_nuget_immutable.py release
 
       - name: Send message to Discord
         if: steps.release.outputs.created == 'true' && inputs.send-discord-message
@@ -237,7 +248,7 @@ jobs:
           MAIN_PROJECT: ${{ inputs.main-project }}
           DISCORD_TOP_LINES: ${{ inputs.discord-top-lines }}
           DISCORD_BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}
-        run: python .github/scripts/publish_nuget_immutable.py discord
+        run: python _publish-nuget-immutable-helper/.github/scripts/publish_nuget_immutable.py discord
 
       - name: Report feed failures
         if: steps.publish.outputs.has-failures == 'true'
