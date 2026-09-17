@@ -56,7 +56,7 @@ on:
         type: boolean
         default: true
       main-project:
-        description: Package name of the main project, used for the release tag/version and the top of the changelog. Defaults to the newly pushed package with the highest version.
+        description: Package name of the main project, used for the release tag/version and the first release-notes section. Defaults to the newly pushed package with the highest version.
         type: string
         default: ""
       create-release:
@@ -68,7 +68,7 @@ on:
         type: boolean
         default: false
       discord-top-lines:
-        description: Newline-separated lines inserted below the heading, before the changelog, in the Discord message. Ignored if the Discord webhook secret isn't set.
+        description: Newline-separated lines inserted below the heading, before the release notes, in the Discord message. Ignored if the Discord webhook secret isn't set.
         type: string
         default: ""
       discord-bottom-lines:
