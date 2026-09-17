@@ -56,7 +56,7 @@ on:
         type: boolean
         default: true
       main-project:
-        description: Package name of the main project, used for the release tag/version and the first release-notes section. Defaults to the newly pushed package with the highest version.
+        description: Package name of the main project, used for the release tag/version and the unheaded first release-notes section. When empty, the highest newly pushed version determines the tag and every package's release notes have a header.
         type: string
         default: ""
       create-release:
@@ -76,7 +76,7 @@ on:
         type: string
         default: ""
       release-title-prefix:
-        description: Prefix for the GitHub Release title. Defaults to empty, which results in the release title being the version only.
+        description: Optional text prepended to the GitHub Release title, separated from the version by one space. Defaults to empty, which results in the release title being the version only.
         type: string
         default: ""
     secrets:

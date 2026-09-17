@@ -225,8 +225,10 @@ def publish():
 
 
 def compose_release_notes(packages):
-    main = select_main_package(packages)
-    sections = [main["notes"] or "*No release notes provided.*"]
+    main = select_main_package(packages) if configured_main_project() else None
+    sections = []
+    if main:
+        sections.append(main["notes"] or "*No release notes provided.*")
     for package in sorted((package for package in packages if package is not main), key=lambda item: item["id"].casefold()):
         notes = package["notes"] or "*No release notes provided.*"
         sections.append(f"## {package['id']} {package['version']}\n\n{notes}")
@@ -242,8 +244,12 @@ def version_key(package):
     return numbers, not prerelease, prerelease
 
 
+def configured_main_project():
+    return os.environ.get("MAIN_PROJECT", "").strip().casefold()
+
+
 def select_main_package(packages):
-    main_project = os.environ.get("MAIN_PROJECT", "").strip().casefold()
+    main_project = configured_main_project()
     if main_project:
         return next((
             package for package in packages
@@ -251,6 +257,12 @@ def select_main_package(packages):
             or Path(package.get("project", "")).parent.name.casefold() == main_project
         ), None) or max(packages, key=version_key)
     return max(packages, key=version_key)
+
+
+def release_title(tag):
+    version = tag.removeprefix("v")
+    prefix = os.environ.get("RELEASE_TITLE_PREFIX", "").strip()
+    return f"{prefix} {version}" if prefix else version
 
 
 def release():
@@ -261,7 +273,7 @@ def release():
     RELEASE_NOTES.write_text(compose_release_notes(packages), encoding="utf-8")
     main = select_main_package(packages)
     tag = os.environ["GITHUB_REF_NAME"] if os.environ.get("GITHUB_REF_TYPE") == "tag" else f"v{main['version']}"
-    title = f"{os.environ.get('RELEASE_TITLE_PREFIX', '')}{tag.removeprefix('v')}"
+    title = release_title(tag)
 
     assets = []
     if enabled("UPLOAD_TO_RELEASE", True):
