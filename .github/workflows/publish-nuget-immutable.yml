@@ -92,7 +92,6 @@ on:
 permissions:
   contents: write
   packages: write
-  id-token: write
 
 concurrency:
   group: publish-nuget-${{ github.repository }}-${{ github.ref }}
