@@ -103,43 +103,38 @@ Requires `id-token: write` permission on the caller when using Trusted Publishin
 
 ### `publish-nuget-immutable.yml` — Publish NuGet Packages (Immutable Release)
 
-Builds, tests, and packs .NET projects like `publish-nuget.yml`. Whenever at least one package is newly pushed, the workflow creates a single GitHub Release (with tag) carrying all of the newly pushed package assets at once, as required by repositories with immutable releases enabled.
+Builds, tests, packs, and publishes one or more .NET packages to NuGet.org, GitHub Packages, and/or custom feeds. Its helper validates each packed `.nupkg`'s actual ID and version against the matching project, then uses the project's `PackageReleaseNotes` (including the changelog convention below) for release notes. The job summary shows the result for every selected feed and symbols upload.
 
-During the build, each discovered project's `[project-folder]/Changelogs/v[Version].md` (where `Version` is the project's `Version` property, or `VersionPrefix` combined with `VersionSuffix` if set) is collected into an artifact (named after the package, assumed to match its project folder name). These are stacked into the release notes: the main project's changelog first, then each other newly-pushed project's changelog under a `### [Package Name] [Version]` heading. The main project is either specified via `main-project` or automatically resolved to the newly-pushed package with the highest (semver) version, which also determines the release tag (`v[version]`).
+Whenever at least one package is uploaded for the first time, the workflow creates one GitHub Release for those newly uploaded packages—a pattern compatible with immutable releases. It attaches their `.nupkg` and `.snupkg` assets unless `upload-to-release` is disabled. The main package is selected by `main-project`, or by highest version; its changelog is first and the other packages follow under a `## [Package ID] [Version]` heading. The release tag uses the caller's tag ref when available, otherwise `v[main package version]`.
 
-During packing, each project's `PackageReleaseNotes` is also set from the same changelog file, if present.
-
-If `DISCORD_WEBHOOK_URL` is set, the same changelog (without the assets note) is posted to Discord once the release is created, prefixed with a heading and optional top lines, followed by a GitHub release link, a NuGet.org package link (if `push-to-nuget` is enabled), and optional bottom lines, split across multiple messages if needed to respect Discord's 2000-character limit without breaking mid-line.
+During packing, `[project-folder]/Changelogs/v[Version].md` is used for `PackageReleaseNotes` when present. If `DISCORD_WEBHOOK_URL` is set, a release announcement using the same notes is sent after the release is created. It is split on line boundaries using Discord's UTF-16 character limit and retries rate-limited requests. The workflow runs the helper's unit tests before building; they are also available at `.github/scripts/test_publish_nuget_immutable.py`.
 
 | Input | Description | Default |
 |---|---|---|
 | `package-prefix` | Filter packages by prefix (e.g. `MyCompany.`) | |
-| `project-path` | Path(s) to build, pack, and resolve changelogs for. Supports wildcards. | |
-| `test-path` | Path(s) to test projects. Supports wildcards. | |
-| `pack-path` | Path(s) to pack. Supports wildcards. Defaults to `project-path`. | |
+| `project-path` | Newline-separated project glob(s) to build. | |
+| `test-path` | Newline-separated test-project glob(s). | |
+| `pack-path` | Newline-separated project glob(s) to pack. Defaults to `project-path`, then the repository root. | |
 | `dotnet-version` | .NET version | `latest` |
 | `workloads` | Comma-separated workloads to install | |
 | `enable-tests` | Run tests | `true` |
-| `enable-coverage` | Generate and publish coverage summary | `true` |
+| `enable-coverage` | Generate and publish coverage summary when tests run | `true` |
 | `push-to-nuget` | Publish to NuGet.org | `true` |
 | `push-to-github` | Publish to GitHub Packages | `true` |
 | `push-to-custom-feeds` | Publish to custom NuGet feeds (requires `custom-feed-urls` and `CUSTOM_FEED_API_KEYS`) | `false` |
 | `custom-feed-urls` | Newline-separated list of custom NuGet feed source URLs | |
-| `upload-to-release` | Reserved; not currently used (all newly pushed packages are always attached to the release) | `true` |
-| `nuget-username` | NuGet.org username for [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC), used to obtain a short-lived API key when `NUGET_API_KEY` is not provided | |
-| `main-project` | Package name of the main project (assumed to match its project folder name), used for the release tag/version and top of the changelog | Newly pushed package with the highest version |
-| `create-release` | Create a GitHub Release (with tag) from the newly pushed packages | `true` |
+| `upload-to-release` | Attach newly uploaded `.nupkg` and `.snupkg` files to the GitHub Release | `true` |
+| `main-project` | Package ID used for the release version and first changelog section | Newly uploaded package with the highest version |
+| `create-release` | Create one immutable GitHub Release for packages newly uploaded during this run | `true` |
 | `discord-top-lines` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message | |
 | `discord-bottom-lines` | Newline-separated lines appended at the very end of the Discord message | |
-| `release-title-prefix` | Prefix for the GitHub Release title. Defaults to empty, which results in the release title being the version only. | `""` |
+| `release-title-prefix` | Prefix for the GitHub Release title. Defaults to empty, so the title is the version only. | `""` |
 
 | Secret | Description |
 |---|---|
-| `NUGET_API_KEY` | nuget.org API key. Optional if `nuget-username` is set to use Trusted Publishing (OIDC) instead |
+| `NUGET_API_KEY` | NuGet.org API key. |
 | `CUSTOM_FEED_API_KEYS` | Newline-separated API keys matching the order of `custom-feed-urls` |
-| `DISCORD_WEBHOOK_URL` | Discord webhook URL. When set, the release changelog is posted to it after the release is created, split to respect Discord's per-message character limit without breaking mid-line |
-
-Requires `id-token: write` permission on the caller when using Trusted Publishing (`nuget-username`).
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL. When set, the release notes are posted after the release is created, split on line boundaries to respect Discord's per-message character limit |
 
 ### `publish-artifact.yml` — Publish Artifacts
 

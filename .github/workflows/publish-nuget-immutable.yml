@@ -1,4 +1,4 @@
-name: Publish NuGet
+name: Publish NuGet Packages (Immutable Release)
 
 on:
   workflow_call:
@@ -8,15 +8,15 @@ on:
         type: string
         default: ""
       project-path:
-        description: Path(s) to build and pack. Supports wildcards (e.g. "src/**/*.csproj"). Defaults to the solution/project in the repo root.
+        description: Newline-separated project paths or globs to build. Defaults to the solution or project in the repository root.
         type: string
         default: ""
       test-path:
-        description: Path(s) to test projects. Supports wildcards (e.g. "tests/**/*.csproj"). Defaults to all test projects discovered by dotnet.
+        description: Newline-separated test-project paths or globs. Defaults to dotnet test discovery in the repository root.
         type: string
         default: ""
       pack-path:
-        description: Path(s) to pack. Supports wildcards. Defaults to project-path, then the repo root.
+        description: Newline-separated project paths or globs to pack. Defaults to project-path, then the repository root.
         type: string
         default: ""
       dotnet-version:
@@ -55,18 +55,18 @@ on:
         description: Upload packages to the GitHub Release
         type: boolean
         default: true
-      nuget-username:
-        description: NuGet.org username for Trusted Publishing (OIDC), used to obtain a short-lived API key when NUGET_API_KEY is not provided. See https://learn.microsoft.com/nuget/nuget-org/trusted-publishing
-        type: string
-        default: ""
       main-project:
-        description: Package name of the main project (assumed to match its project folder name), used for the release tag/version and the top of the changelog. Defaults to the newly pushed package with the highest version.
+        description: Package name of the main project, used for the release tag/version and the top of the changelog. Defaults to the newly pushed package with the highest version.
         type: string
         default: ""
       create-release:
         description: Create a GitHub Release (with tag) from the newly pushed packages
         type: boolean
         default: true
+      send-discord-message:
+        description: Send the release notes to Discord
+        type: boolean
+        default: false
       discord-top-lines:
         description: Newline-separated lines inserted below the heading, before the changelog, in the Discord message. Ignored if the Discord webhook secret isn't set.
         type: string
@@ -90,479 +90,158 @@ on:
         required: false
 
 permissions:
-  contents: write # important for release description edit and asset upload
+  contents: write
   packages: write
-  # id-token: write # for NuGet Trusted Publishing (OIDC), see nuget-username input
+  id-token: write
+
+concurrency:
+  group: publish-nuget-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build & Pack
+  deploy:
+    name: Build, test, and publish NuGet packages
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set DOTNET_INSTALL_DIR
-        run: echo "DOTNET_INSTALL_DIR=$HOME/.dotnet" >> $GITHUB_ENV
-
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
-          workloads: ${{ inputs.workloads }}
+
+      - name: Install .NET workloads
+        if: inputs.workloads != ''
+        shell: bash
+        env:
+          WORKLOADS: ${{ inputs.workloads }}
+        run: |
+          workloads="${WORKLOADS//,/ }"
+          dotnet workload install $workloads
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Test publish helper
+        run: python .github/scripts/test_publish_nuget_immutable.py
 
       - name: Build
+        shell: bash
+        env:
+          PROJECT_PATH: ${{ inputs.project-path }}
         run: |
-          if [ -n "${{ inputs.project-path }}" ]; then
-            for project in ${{ inputs.project-path }}; do
+          set -euo pipefail
+          if [[ -z "$PROJECT_PATH" ]]; then
+            dotnet build -c Release -p:ContinuousIntegrationBuild=true
+            exit 0
+          fi
+          while IFS= read -r pattern || [[ -n "$pattern" ]]; do
+            [[ -z "$pattern" ]] && continue
+            mapfile -t projects < <(compgen -G "$pattern" || true)
+            ((${#projects[@]})) || { echo "No projects match: $pattern" >&2; exit 1; }
+            for project in "${projects[@]}"; do
               dotnet build "$project" -c Release -p:ContinuousIntegrationBuild=true
             done
-          else
-            dotnet build -c Release -p:ContinuousIntegrationBuild=true
-          fi
+          done <<< "$PROJECT_PATH"
 
       - name: Test
         if: inputs.enable-tests
+        shell: bash
+        env:
+          TEST_PATH: ${{ inputs.test-path }}
         run: |
-          if [ -n "${{ inputs.test-path }}" ]; then
-            for project in ${{ inputs.test-path }}; do
+          set -euo pipefail
+          if [[ -z "$TEST_PATH" ]]; then
+            dotnet test -c Release --collect:"XPlat Code Coverage" --results-directory ./coverage
+            exit 0
+          fi
+          while IFS= read -r pattern || [[ -n "$pattern" ]]; do
+            [[ -z "$pattern" ]] && continue
+            mapfile -t projects < <(compgen -G "$pattern" || true)
+            ((${#projects[@]})) || { echo "No test projects match: $pattern" >&2; exit 1; }
+            for project in "${projects[@]}"; do
               dotnet test "$project" -c Release --collect:"XPlat Code Coverage" --results-directory ./coverage
             done
-          else
-            dotnet test -c Release --collect:"XPlat Code Coverage" --results-directory ./coverage
-          fi
+          done <<< "$TEST_PATH"
 
-      - name: Generate Code Coverage Summary
-        if: inputs.enable-coverage
+      - name: Generate code coverage summary
+        if: inputs.enable-tests && inputs.enable-coverage
         run: |
-          dotnet tool install -g dotnet-reportgenerator-globaltool
+          dotnet tool install --global dotnet-reportgenerator-globaltool
           reportgenerator -reports:"./coverage/**/coverage.cobertura.xml" -targetdir:"./coveragereport" -reporttypes:"MarkdownSummaryGithub"
+          cat ./coveragereport/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish Coverage to Job Summary
-        if: inputs.enable-coverage
-        run: cat ./coveragereport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
-
-      - name: Pack
+      - name: Pack packages
+        shell: bash
+        env:
+          PACK_PATH: ${{ inputs.pack-path }}
+          PROJECT_PATH: ${{ inputs.project-path }}
+          PACKAGE_PREFIX: ${{ inputs.package-prefix }}
         run: |
-          mkdir -p ./packages ./changelogs
-          > ./packages/manifest.tsv
-
-          # Records the exact PackageId/Version of a packed project to ./packages/manifest.tsv, so the
-          # release job can look them up instead of (ambiguously) parsing them back out of the .nupkg
-          # filename - e.g. a package id ending in digits, like "ManiaPlanet3", is indistinguishable
-          # from a version prefix once concatenated as "ManiaPlanet3.1.0.0.nupkg".
-          # Also reads [project]/Changelogs/v[Version].md, if present, copies it to ./changelogs/<name>.md,
-          # and returns its content (escaped) for the PackageReleaseNotes property.
-          resolve_project_info() {
-            local project="$1"
-            local csproj="$project"
-            [ -d "$project" ] && csproj=$(find "$project" -maxdepth 1 -name '*.csproj' | head -n 1)
-            [ -z "$csproj" ] && return
-
-            local props id version suffix
-            props=$(dotnet msbuild "$csproj" -nologo -getProperty:PackageId,AssemblyName,Version,VersionPrefix,VersionSuffix 2>/dev/null) || props='{}'
-
-            id=$(echo "$props" | jq -r '.Properties.PackageId // empty')
-            [ -z "$id" ] && id=$(echo "$props" | jq -r '.Properties.AssemblyName // empty')
-            [ -z "$id" ] && id=$(basename "$csproj" .csproj)
-
-            version=$(echo "$props" | jq -r '.Properties.VersionPrefix // empty')
-            if [ -n "$version" ]; then
-              suffix=$(echo "$props" | jq -r '.Properties.VersionSuffix // empty')
-              [ -n "$suffix" ] && version="${version}-${suffix}"
-            else
-              version=$(echo "$props" | jq -r '.Properties.Version // empty')
-            fi
-            [ -z "$version" ] && return
-
-            printf '%s.%s.nupkg\t%s\t%s\n' "$id" "$version" "$id" "$version" >> ./packages/manifest.tsv
-
-            local project_dir changelog_file
-            project_dir=$(dirname "$csproj")
-            if [ "$project_dir" = "." ]; then
-              changelog_file="Changelogs/v${version}.md"
-            else
-              changelog_file="${project_dir}/Changelogs/v${version}.md"
-            fi
-            [ -f "$changelog_file" ] || return
-
-            # Name the copy after the package id (not the containing folder), since that's
-            # how the release job looks it up - they can differ, e.g. a template-pack project
-            # at "templates/MyCompany.Templates.csproj" with PackageId "MyCompany.Templates".
-            cp "$changelog_file" "./changelogs/${id}.md"
-
-            local notes
-            notes=$(cat "$changelog_file")
-            notes="${notes//%/%25}"
-            echo "${notes//;/%3B}"
-          }
-
-          pack_project() {
-            local project="$1"
-            shift
-
-            local notes
-            notes=$(resolve_project_info "$project")
-
-            if [ -n "$notes" ]; then
-              dotnet pack "$project" -c Release "$@" --output ./packages -p:PackageReleaseNotes="$notes"
-            else
-              dotnet pack "$project" -c Release "$@" --output ./packages
-            fi
-          }
-
-          if [ -n "${{ inputs.pack-path }}" ]; then
-            for project in ${{ inputs.pack-path }}; do
-              pack_project "$project"
-            done
-          elif [ -n "${{ inputs.project-path }}" ]; then
-            for project in ${{ inputs.project-path }}; do
-              pack_project "$project" --no-build
-            done
+          set -euo pipefail
+          mkdir -p packages
+          pack_path="${PACK_PATH:-$PROJECT_PATH}"
+          if [[ -z "$pack_path" ]]; then
+            dotnet pack -c Release -p:ContinuousIntegrationBuild=true --output ./packages
           else
-            while IFS= read -r project; do
-              pack_project "$project" --no-build
-            done < <(find . -name '*.csproj' -not -path '*/bin/*' -not -path '*/obj/*' | sort -u)
+            while IFS= read -r pattern || [[ -n "$pattern" ]]; do
+              [[ -z "$pattern" ]] && continue
+              mapfile -t projects < <(compgen -G "$pattern" || true)
+              ((${#projects[@]})) || { echo "No projects to pack match: $pattern" >&2; exit 1; }
+              for project in "${projects[@]}"; do
+                dotnet pack "$project" -c Release -p:ContinuousIntegrationBuild=true --output ./packages
+              done
+            done <<< "$pack_path"
           fi
+          python .github/scripts/publish_nuget_immutable.py prepare
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v7
         with:
           name: nuget-packages
-          path: ./packages/${{ inputs.package-prefix }}*.*nupkg
+          path: |
+            packages/${{ inputs.package-prefix }}*.nupkg
+            packages/${{ inputs.package-prefix }}*.snupkg
+          if-no-files-found: error
 
-      - name: Upload package manifest artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: package-manifest
-          path: ./packages/manifest.tsv
-
-      - name: Upload changelog artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: changelogs
-          path: ./changelogs/*.md
-          if-no-files-found: ignore
-
-  publish:
-    needs: build
-    name: Publish Packages
-    runs-on: ubuntu-latest
-
-    outputs:
-      has-new: ${{ steps.publish.outputs.has-new }}
-
-    permissions:
-      packages: write
-      # id-token: write # for NuGet Trusted Publishing (OIDC), see nuget-username input
-
-    env:
-      PACKAGE_PREFIX: ${{ inputs.package-prefix }}
-      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-
-    steps:
-      - name: Download package artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: nuget-packages
-          path: ./packages
-
-      - name: NuGet login (Trusted Publishing OIDC)
-        if: inputs.push-to-nuget && env.NUGET_API_KEY == '' && inputs.nuget-username != ''
-        uses: NuGet/login@v1
-        id: nuget_login
-        with:
-          user: ${{ inputs.nuget-username }}
-
-      - name: Publish packages to feeds
+      - name: Publish packages
         id: publish
         env:
-          NUGET_API_KEY: ${{ env.NUGET_API_KEY || steps.nuget_login.outputs.NUGET_API_KEY }}
-          CUSTOM_FEED_URLS: ${{ inputs.custom-feed-urls }}
-          CUSTOM_FEED_API_KEYS: ${{ secrets.CUSTOM_FEED_API_KEYS }}
-        run: |
-          > ./newly_pushed.txt
-
-          # Pushes to one feed, tolerating "already exists" conflicts (e.g. re-running a partially-failed publish).
-          push_feed() {
-            local pkg="$1" url="$2" key="$3"
-            local out rc
-            out=$(dotnet nuget push "$pkg" -k "$key" -s "$url" 2>&1) && rc=0 || rc=$?
-            echo "$out"
-            [[ $rc -eq 0 ]] && return 0
-            echo "$out" | grep -qiE "already exists|409|conflict" && return 1
-            exit $rc
-          }
-
-          # Build the list of feeds to push to, as parallel url/key arrays.
-          feed_urls=()
-          feed_keys=()
-
-          if [[ "${{ inputs.push-to-nuget }}" == "true" ]]; then
-            feed_urls+=("https://api.nuget.org/v3/index.json")
-            feed_keys+=("$NUGET_API_KEY")
-          fi
-
-          if [[ "${{ inputs.push-to-github }}" == "true" ]]; then
-            feed_urls+=("https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json")
-            feed_keys+=("${{ secrets.GITHUB_TOKEN }}")
-          fi
-
-          if [[ "${{ inputs.push-to-custom-feeds }}" == "true" && -n "$CUSTOM_FEED_URLS" ]]; then
-            mapfile -t URLS <<< "$CUSTOM_FEED_URLS"
-            mapfile -t KEYS <<< "$CUSTOM_FEED_API_KEYS"
-            for i in "${!URLS[@]}"; do
-              if [[ -n "${URLS[$i]}" && -n "${KEYS[$i]}" ]]; then
-                feed_urls+=("${URLS[$i]}")
-                feed_keys+=("${KEYS[$i]}")
-              fi
-            done
-          fi
-
-          # Prevents loop from running if no .nupkg files are found
-          shopt -s nullglob
-
-          for pkg in ./packages/${PACKAGE_PREFIX}*.nupkg; do
-            pushed=false
-            for i in "${!feed_urls[@]}"; do
-              push_feed "$pkg" "${feed_urls[$i]}" "${feed_keys[$i]}" && pushed=true
-            done
-            [[ "$pushed" == "true" ]] && echo "$pkg" >> ./newly_pushed.txt
-          done
-
-          if [[ -s ./newly_pushed.txt ]]; then
-            echo "has-new=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has-new=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Upload newly-pushed list
-        uses: actions/upload-artifact@v7
-        with:
-          name: newly-pushed
-          path: ./newly_pushed.txt
-
-  release:
-    needs: publish
-    if: needs.publish.outputs.has-new == 'true'
-    name: Create Release
-    runs-on: ubuntu-latest
-
-    outputs:
-      has-new: ${{ needs.publish.outputs.has-new }}
-      version: ${{ steps.changelog.outputs.version }}
-      main-id: ${{ steps.changelog.outputs.main-id }}
-      main-version: ${{ steps.changelog.outputs.main-version }}
-      url: ${{ steps.create_release.outputs.url }}
-
-    permissions:
-      contents: write
-
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    steps:
-      - name: Download package artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: nuget-packages
-          path: ./packages
-
-      - name: Download changelog artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: changelogs
-          path: ./changelogs
-        continue-on-error: true
-
-      - name: Download package manifest artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: package-manifest
-          path: ./packages
-
-      - name: Download newly-pushed list
-        uses: actions/download-artifact@v8
-        with:
-          name: newly-pushed
-          path: ./
-
-      - name: Build release changelog
-        id: changelog
-        run: |
-          declare -A pkg_versions
-          packages=()
-
-          # Look up each newly pushed package's exact id/version from the manifest recorded during
-          # Pack, rather than parsing the .nupkg filename (which is ambiguous when a package id ends
-          # in digits, e.g. "ManiaPlanet3.1.0.0.nupkg" could be id "ManiaPlanet3" version "1.0.0" or
-          # id "ManiaPlanet" version "3.1.0.0").
-          while IFS= read -r pkg; do
-            if [[ -n "$pkg" ]]; then
-              filename=$(basename "$pkg")
-              entry=$(awk -F'\t' -v f="$filename" '$1 == f { print $2 "\t" $3; exit }' ./packages/manifest.tsv)
-              name=$(cut -f1 <<< "$entry")
-              version=$(cut -f2 <<< "$entry")
-
-              pkg_versions["$name"]="$version"
-              packages+=("$name")
-            fi
-          done < ./newly_pushed.txt
-
-          # Determine main project
-          # Falls back to the newly pushed package with the highest (semver) version
-          # when main-project isn't provided or wasn't among the newly pushed packages.
-          main_pkg="${{ inputs.main-project }}"
-          if [[ -z "$main_pkg" || -z "${pkg_versions[$main_pkg]}" ]]; then
-            main_pkg=$(
-              for name in "${packages[@]}"; do
-                printf '%s|%s\n' "${pkg_versions[$name]}" "$name"
-              done | sort -t'|' -k1,1 -V | tail -n 1 | cut -d'|' -f2
-            )
-          fi
-
-          release_version="${pkg_versions[$main_pkg]}"
-          release_tag="v${release_version}"
-          echo "Tag: $release_tag"
-
-          # Construct changelog
-          notes_file="changelog_github.md"
-          > "$notes_file"
-
-          # Append main project changelog
-          # Changelog artifacts are named after the package id (see resolve_project_info in Pack step)
-          main_cl_file="./changelogs/${main_pkg}.md"
-
-          if [[ -f "$main_cl_file" ]]; then
-            cat "$main_cl_file" >> "$notes_file"
-          else
-            echo "*No changelog found.*" >> "$notes_file"
-          fi
-          echo -e "\n\n" >> "$notes_file"
-
-          # Append other projects' changelogs
-          for name in "${packages[@]}"; do
-            if [[ "$name" == "$main_pkg" ]]; then continue; fi
-
-            ver="${pkg_versions[$name]}"
-            echo "### $name $ver" >> "$notes_file"
-
-            cl_file="./changelogs/${name}.md"
-            if [[ -f "$cl_file" ]]; then
-              cat "$cl_file" >> "$notes_file"
-            else
-              echo "*No changelog found.*" >> "$notes_file"
-            fi
-            echo -e "\n" >> "$notes_file"
-          done
-
-          # Keep a copy of the changelog without the assets note, for Discord
-          cp "$notes_file" changelog.md
-
-          # Append the automatically-generated assets note
-          echo "Assets were automatically generated using the [publish workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})." >> "$notes_file"
-
-          echo "Generated stacked release notes:"
-          cat "$notes_file"
-
-          echo "version=$release_version" >> "$GITHUB_OUTPUT"
-          echo "main-id=$main_pkg" >> "$GITHUB_OUTPUT"
-          echo "main-version=$release_version" >> "$GITHUB_OUTPUT"
-
-      - name: Upload release notes
-        uses: actions/upload-artifact@v7
-        with:
-          name: changelog
-          path: changelog.md
-
-      - name: Create GitHub Release
-        id: create_release
-        if: inputs.create-release
-        run: |
-          mapfile -t all_pkg_files < ./newly_pushed.txt
-
-          URL=$(gh release create "v${{ steps.changelog.outputs.version }}" \
-            "${all_pkg_files[@]}" \
-            --title "${{ inputs.release-title-prefix }} ${{ steps.changelog.outputs.version }}" \
-            --notes-file changelog_github.md \
-            --repo ${{ github.repository }})
-
-          echo "$URL"
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-
-  discord:
-    needs: [release, publish]
-    if: always() && needs.release.result == 'success' && inputs.create-release && needs.publish.outputs.has-new == 'true'
-    name: Notify Discord
-    runs-on: ubuntu-slim
-
-    env:
-      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-
-    steps:
-      - name: Download changelog artifact
-        if: env.DISCORD_WEBHOOK_URL != ''
-        uses: actions/download-artifact@v8
-        with:
-          name: changelog
-          path: ./notes
-
-      - name: Send announcement to Discord
-        if: env.DISCORD_WEBHOOK_URL != ''
-        env:
-          TOP_LINES: ${{ inputs.discord-top-lines }}
-          BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}
-          RELEASE_TITLE_PREFIX: ${{ inputs.release-title-prefix }}
-          VERSION: ${{ needs.release.outputs.version }}
-          MAIN_ID: ${{ needs.release.outputs.main-id }}
-          MAIN_VERSION: ${{ needs.release.outputs.main-version }}
-          RELEASE_URL: ${{ needs.release.outputs.url }}
           PUSH_TO_NUGET: ${{ inputs.push-to-nuget }}
+          PUSH_TO_GITHUB: ${{ inputs.push-to-github }}
+          PUSH_TO_CUSTOM_FEEDS: ${{ inputs.push-to-custom-feeds }}
+          CUSTOM_FEED_URLS: ${{ inputs.custom-feed-urls }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          GITHUB_PACKAGES_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          CUSTOM_FEED_API_KEYS: ${{ secrets.CUSTOM_FEED_API_KEYS }}
+        run: python .github/scripts/publish_nuget_immutable.py publish
+
+      - name: Create release from newly uploaded packages
+        if: steps.publish.outputs.has-new == 'true' && inputs.create-release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAIN_PROJECT: ${{ inputs.main-project }}
+          UPLOAD_TO_RELEASE: ${{ inputs.upload-to-release }}
+          RELEASE_TITLE_PREFIX: ${{ inputs.release-title-prefix }}
+        run: python .github/scripts/publish_nuget_immutable.py release
+
+      - name: Send message to Discord
+        if: steps.release.outputs.created == 'true' && inputs.send-discord-message
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          MAIN_PROJECT: ${{ inputs.main-project }}
+          DISCORD_TOP_LINES: ${{ inputs.discord-top-lines }}
+          DISCORD_BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}
+        run: python .github/scripts/publish_nuget_immutable.py discord
+
+      - name: Report feed failures
+        if: steps.publish.outputs.has-failures == 'true'
         run: |
-          set -euo pipefail
-
-          {
-            echo "## ${RELEASE_TITLE_PREFIX} ${VERSION}"
-            if [ -n "$TOP_LINES" ]; then
-              echo "$TOP_LINES"
-            fi
-            echo
-            cat ./notes/changelog.md
-            echo
-            echo "GitHub: [Release Link](<${RELEASE_URL}>)"
-            if [ "$PUSH_TO_NUGET" = "true" ]; then
-              echo "NuGet: [Package Link](<https://www.nuget.org/packages/${MAIN_ID}/${MAIN_VERSION}>)"
-            fi
-            if [ -n "$BOTTOM_LINES" ]; then
-              echo "$BOTTOM_LINES"
-            fi
-          } > discord_message.md
-
-          # Split into <=2000 char chunks, only breaking on line boundaries.
-          LIMIT=2000
-          CONTENT="$(cat discord_message.md)"
-          i=0
-          while [ -n "$CONTENT" ]; do
-            if [ "${#CONTENT}" -le "$LIMIT" ]; then
-              CHUNK="$CONTENT"
-              CONTENT=""
-            else
-              HEAD="${CONTENT:0:$LIMIT}"
-              CUT=$(printf '%s' "$HEAD" | grep -bo $'\n' | tail -1 | cut -d: -f1)
-              if [ -z "$CUT" ]; then
-                CUT=$LIMIT
-                CHUNK="${CONTENT:0:$CUT}"
-                CONTENT="${CONTENT:$CUT}"
-              else
-                CHUNK="${CONTENT:0:$CUT}"
-                CONTENT="${CONTENT:$((CUT+1))}"
-              fi
-            fi
-            printf '%s' "$CHUNK" > "chunk_$(printf '%03d' "$i").md"
-            i=$((i+1))
-          done
-
-          for f in chunk_*.md; do
-            PAYLOAD=$(jq -Rs '{content: .}' < "$f")
-            curl -fsSL -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
-          done
+          echo 'One or more package feeds rejected an upload; see the publish summary.' >&2
+          exit 1
