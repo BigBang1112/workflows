@@ -103,11 +103,11 @@ Requires `id-token: write` permission on the caller when using Trusted Publishin
 
 ### `publish-nuget-immutable.yml` — Publish NuGet Packages (Immutable Release)
 
-Builds, tests, packs, and publishes one or more .NET packages to NuGet.org, GitHub Packages, and/or custom feeds. Its helper validates each packed `.nupkg`'s actual ID and version against the matching project, then uses the project's `PackageReleaseNotes` (including the changelog convention below) for release notes. The job summary shows the result for every selected feed and symbols upload.
+Builds, tests, packs, and publishes one or more .NET packages to NuGet.org, GitHub Packages, and/or custom feeds. Its helper validates each packed `.nupkg`'s actual ID and version against the matching project, then uses the project's `<PackageReleaseNotes>` MSBuild XML property for release notes. The job summary shows the result for every selected feed and symbols upload.
 
-Whenever at least one package is uploaded for the first time, the workflow creates one GitHub Release for those newly uploaded packages—a pattern compatible with immutable releases. It attaches their `.nupkg` and `.snupkg` assets unless `upload-to-release` is disabled. The main package is selected by `main-project`, or by highest version; its changelog is first and the other packages follow under a `## [Package ID] [Version]` heading. The release tag uses the caller's tag ref when available, otherwise `v[main package version]`.
+Whenever at least one package is uploaded for the first time, the workflow creates one GitHub Release for those newly uploaded packages—a pattern compatible with immutable releases. It attaches their `.nupkg` and `.snupkg` assets unless `upload-to-release` is disabled. The main package is selected by `main-project`, or by highest version; its release notes are first and the other packages follow under a `## [Package ID] [Version]` heading. The release tag uses the caller's tag ref when available, otherwise `v[main package version]`.
 
-During packing, `[project-folder]/Changelogs/v[Version].md` is used for `PackageReleaseNotes` when present. If `DISCORD_WEBHOOK_URL` is set, a release announcement using the same notes is sent after the release is created. It is split on line boundaries using Discord's UTF-16 character limit and retries rate-limited requests. The workflow runs the helper's unit tests before building; they are also available at `.github/scripts/test_publish_nuget_immutable.py`.
+Release notes come directly from each project's `<PackageReleaseNotes>` MSBuild XML property. If `DISCORD_WEBHOOK_URL` is set, a release announcement using the same notes is sent after the release is created. It is split on line boundaries using Discord's UTF-16 character limit and retries rate-limited requests. The workflow runs the helper's unit tests before building; they are also available at `.github/scripts/test_publish_nuget_immutable.py`.
 
 | Input | Description | Default |
 |---|---|---|
@@ -124,9 +124,9 @@ During packing, `[project-folder]/Changelogs/v[Version].md` is used for `Package
 | `push-to-custom-feeds` | Publish to custom NuGet feeds (requires `custom-feed-urls` and `CUSTOM_FEED_API_KEYS`) | `false` |
 | `custom-feed-urls` | Newline-separated list of custom NuGet feed source URLs | |
 | `upload-to-release` | Attach newly uploaded `.nupkg` and `.snupkg` files to the GitHub Release | `true` |
-| `main-project` | Package ID used for the release version and first changelog section | Newly uploaded package with the highest version |
+| `main-project` | Package ID used for the release version and first release-notes section | Newly uploaded package with the highest version |
 | `create-release` | Create one immutable GitHub Release for packages newly uploaded during this run | `true` |
-| `discord-top-lines` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message | |
+| `discord-top-lines` | Newline-separated lines inserted below the heading, before the release notes, in the Discord message | |
 | `discord-bottom-lines` | Newline-separated lines appended at the very end of the Discord message | |
 | `release-title-prefix` | Prefix for the GitHub Release title. Defaults to empty, so the title is the version only. | `""` |
 
