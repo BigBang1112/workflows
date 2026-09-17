@@ -103,7 +103,7 @@ Requires `id-token: write` permission on the caller when using Trusted Publishin
 
 ### `publish-nuget-immutable.yml` — Publish NuGet Packages (Immutable Release)
 
-Builds, tests, packs, and publishes one or more .NET packages to NuGet.org, GitHub Packages, and/or custom feeds. Its helper validates each packed `.nupkg`'s actual ID and version against the matching project, then uses the project's `<PackageReleaseNotes>` MSBuild XML property for release notes. The job summary shows the result for every selected feed and symbols upload.
+Builds, tests, packs, and publishes one or more .NET packages to NuGet.org, GitHub Packages, and/or custom feeds. Its helper validates each packed `.nupkg`'s actual ID and version against the matching project, then uses the project's `<PackageReleaseNotes>` MSBuild XML property for release notes. The job summary shows the result for every selected feed and symbols upload. When called from another repository, the workflow checks out its bundled Python helper at the same commit as the reusable workflow, so callers do not need to copy helper files.
 
 Whenever at least one package is uploaded for the first time, the workflow creates one GitHub Release for those newly uploaded packages—a pattern compatible with immutable releases. It attaches their `.nupkg` and `.snupkg` assets unless `upload-to-release` is disabled. When `main-project` is set, that package's release notes are first and unheaded; the other packages follow under a `## [Package ID] [Version]` heading. When it is empty, the highest newly uploaded version determines the release tag and every package's release notes have a `## [Package ID] [Version]` heading. The release tag uses the caller's tag ref when available, otherwise `v[main package version]`.
 
