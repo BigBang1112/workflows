@@ -106,6 +106,33 @@ class PublishNugetTests(unittest.TestCase):
             notes,
         )
 
+    def test_empty_main_project_uses_highest_version_for_tag_and_headers_every_notes_section(self):
+        packages = [
+            {"id": "Package.X", "version": "2.0.0", "notes": "Fixed a bug."},
+            {"id": "Package.Y", "version": "9.0.0", "notes": "Added a feature."},
+        ]
+        environment = {
+            "GITHUB_REPOSITORY": "owner/repo",
+            "GITHUB_RUN_ID": "123",
+            "MAIN_PROJECT": "",
+            "RELEASE_TITLE_PREFIX": "",
+        }
+        with patch.dict(os.environ, environment):
+            self.assertEqual("Package.Y", target.select_main_package(packages)["id"])
+            self.assertEqual(
+                "## Package.X 2.0.0\n\nFixed a bug.\n\n"
+                "## Package.Y 9.0.0\n\nAdded a feature.\n\n"
+                "Assets were automatically generated using the "
+                "[publish workflow](<https://github.com/owner/repo/actions/runs/123>).\n",
+                target.compose_release_notes(packages),
+            )
+
+    def test_release_title_prefix_is_separated_from_the_version(self):
+        with patch.dict(os.environ, {"RELEASE_TITLE_PREFIX": "Release"}):
+            self.assertEqual("Release 1.0.0", target.release_title("v1.0.0"))
+        with patch.dict(os.environ, {"RELEASE_TITLE_PREFIX": ""}):
+            self.assertEqual("1.0.0", target.release_title("v1.0.0"))
+
     def test_release_attaches_only_uploaded_package_assets(self):
         with tempfile.TemporaryDirectory() as directory:
             old_directory = Path.cwd()

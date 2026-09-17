@@ -105,7 +105,7 @@ Requires `id-token: write` permission on the caller when using Trusted Publishin
 
 Builds, tests, packs, and publishes one or more .NET packages to NuGet.org, GitHub Packages, and/or custom feeds. Its helper validates each packed `.nupkg`'s actual ID and version against the matching project, then uses the project's `<PackageReleaseNotes>` MSBuild XML property for release notes. The job summary shows the result for every selected feed and symbols upload.
 
-Whenever at least one package is uploaded for the first time, the workflow creates one GitHub Release for those newly uploaded packages—a pattern compatible with immutable releases. It attaches their `.nupkg` and `.snupkg` assets unless `upload-to-release` is disabled. The main package is selected by `main-project`, or by highest version; its release notes are first and the other packages follow under a `## [Package ID] [Version]` heading. The release tag uses the caller's tag ref when available, otherwise `v[main package version]`.
+Whenever at least one package is uploaded for the first time, the workflow creates one GitHub Release for those newly uploaded packages—a pattern compatible with immutable releases. It attaches their `.nupkg` and `.snupkg` assets unless `upload-to-release` is disabled. When `main-project` is set, that package's release notes are first and unheaded; the other packages follow under a `## [Package ID] [Version]` heading. When it is empty, the highest newly uploaded version determines the release tag and every package's release notes have a `## [Package ID] [Version]` heading. The release tag uses the caller's tag ref when available, otherwise `v[main package version]`.
 
 Release notes come directly from each project's `<PackageReleaseNotes>` MSBuild XML property. If `DISCORD_WEBHOOK_URL` is set, a release announcement using the same notes is sent after the release is created. It is split on line boundaries using Discord's UTF-16 character limit and retries rate-limited requests. The workflow runs the helper's unit tests before building; they are also available at `.github/scripts/test_publish_nuget_immutable.py`.
 
@@ -124,11 +124,11 @@ Release notes come directly from each project's `<PackageReleaseNotes>` MSBuild 
 | `push-to-custom-feeds` | Publish to custom NuGet feeds (requires `custom-feed-urls` and `CUSTOM_FEED_API_KEYS`) | `false` |
 | `custom-feed-urls` | Newline-separated list of custom NuGet feed source URLs | |
 | `upload-to-release` | Attach newly uploaded `.nupkg` and `.snupkg` files to the GitHub Release | `true` |
-| `main-project` | Package ID used for the release version and first release-notes section | Newly uploaded package with the highest version |
+| `main-project` | Package ID used for the release version and unheaded first release-notes section; when empty, the highest version determines the release version and all sections have headers | |
 | `create-release` | Create one immutable GitHub Release for packages newly uploaded during this run | `true` |
 | `discord-top-lines` | Newline-separated lines inserted below the heading, before the release notes, in the Discord message | |
 | `discord-bottom-lines` | Newline-separated lines appended at the very end of the Discord message | |
-| `release-title-prefix` | Prefix for the GitHub Release title. Defaults to empty, so the title is the version only. | `""` |
+| `release-title-prefix` | Optional text before the GitHub Release title version; one space is inserted between them. | `""` |
 
 | Secret | Description |
 |---|---|
