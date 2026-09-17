@@ -1,0 +1,380 @@
+"""Pack metadata, publish results, and release notes for publish-nuget-immutable.yml.
+
+Test from the repository root with ``python .github/scripts/test_publish_nuget_immutable.py``.
+The tests mock external publishing and notification requests.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import textwrap
+import time
+import urllib.error
+import urllib.request
+import xml.etree.ElementTree as ET
+import zipfile
+from pathlib import Path
+
+
+PACKAGE_DIR = Path("packages")
+MANIFEST = PACKAGE_DIR / "manifest.json"
+PUBLISH_RESULTS = PACKAGE_DIR / "publish-results.json"
+NEWLY_UPLOADED = PACKAGE_DIR / "newly-uploaded.json"
+RELEASE_NOTES = Path("release-notes.md")
+PUSHED = re.compile(r"(?m)^\s*Your package was pushed\.\s*$")
+CREATED = re.compile(r"(?m)^\s*Created\s+https?://")
+DUPLICATE = re.compile(r"\b(?:already exists|409|conflict)\b", re.I)
+
+
+def run(command):
+    return subprocess.run(command, capture_output=True, text=True, errors="replace", check=False)
+
+
+def package_identity(package):
+    with zipfile.ZipFile(package) as archive:
+        nuspecs = [name for name in archive.namelist() if name.endswith(".nuspec")]
+        if len(nuspecs) != 1:
+            raise ValueError(f"Expected one .nuspec in {package}")
+        metadata = ET.fromstring(archive.read(nuspecs[0])).find("{*}metadata")
+        if metadata is None:
+            raise ValueError(f"Missing metadata in {package}")
+        package_id = metadata.findtext("{*}id")
+        version = metadata.findtext("{*}version")
+        if not package_id or not version:
+            raise ValueError(f"Missing package ID or version in {package}")
+        return package_id, version
+
+
+def project_properties(project):
+    result = run([
+        "dotnet", "msbuild", str(project), "-nologo",
+        "-property:Configuration=Release", "-property:ContinuousIntegrationBuild=true",
+        "-getProperty:PackageId,Version,PackageReleaseNotes",
+    ])
+    if result.returncode:
+        raise RuntimeError(f"Could not read package properties from {project}: {result.stderr}")
+    return json.loads(result.stdout)["Properties"]
+
+
+def configured_projects():
+    patterns = os.environ.get("PACK_PATH") or os.environ.get("PROJECT_PATH")
+    if patterns:
+        projects = []
+        for pattern in patterns.splitlines():
+            projects.extend(Path(".").glob(pattern.strip()))
+    else:
+        projects = Path(".").glob("**/*.csproj")
+    return sorted({project for project in projects if project.is_file() and not {"bin", "obj"}.intersection(project.parts)})
+
+
+def prepare():
+    prefix = os.environ.get("PACKAGE_PREFIX", "").casefold()
+    by_identity = {}
+    for project in configured_projects():
+        properties = project_properties(project)
+        package_id = properties["PackageId"] or project.stem
+        version = properties["Version"]
+        key = (package_id.casefold(), version.casefold())
+        by_identity.setdefault(key, []).append((project, properties["PackageReleaseNotes"]))
+
+    packages = [
+        package for package in sorted(PACKAGE_DIR.glob("*.nupkg"))
+        if package_identity(package)[0].casefold().startswith(prefix)
+    ]
+    if not packages:
+        suffix = f" matching package-prefix {prefix!r}" if prefix else ""
+        raise ValueError(f"No NuGet packages were packed{suffix}")
+
+    manifest = []
+    for package in packages:
+        package_id, version = package_identity(package)
+        key = (package_id.casefold(), version.casefold())
+        matches = by_identity.get(key, [])
+        if not matches:
+            raise ValueError(f"No csproj matches packed package {package_id} {version}")
+        if len(matches) > 1:
+            raise ValueError(f"Multiple projects produce {package_id} {version}")
+        project, notes = matches[0]
+        manifest.append({
+            "path": str(package),
+            "id": package_id,
+            "version": version,
+            "project": str(project),
+            "notes": textwrap.dedent(notes).strip(),
+        })
+
+    MANIFEST.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"Prepared metadata for {len(manifest)} packages")
+
+
+def classify_push(returncode, output):
+    if returncode != 0:
+        return "failed"
+    if DUPLICATE.search(output):
+        return "duplicate"
+    if PUSHED.search(output) or CREATED.search(output):
+        return "uploaded"
+    return "unconfirmed"
+
+
+def push(package, feed, url, key, no_symbols=False):
+    if not key:
+        print(f"{package.name} -> {feed}: missing API key")
+        return "failed"
+    command = [
+        "dotnet", "nuget", "push", str(package),
+        "--api-key", key, "--source", url,
+        "--skip-duplicate", "--force-english-output",
+    ]
+    if no_symbols:
+        command.append("--no-symbols")
+    result = run(command)
+    output = (result.stdout + "\n" + result.stderr).replace(key, "[redacted]")
+    status = classify_push(result.returncode, output)
+    print(f"{package.name} -> {feed}: {status}")
+    if status in ("failed", "unconfirmed"):
+        print(output)
+    return status
+
+
+def append_output(key, value):
+    if path := os.environ.get("GITHUB_OUTPUT"):
+        with open(path, "a", encoding="utf-8") as output:
+            output.write(f"{key}={value}\n")
+
+
+def append_summary(text):
+    if path := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(path, "a", encoding="utf-8") as summary:
+            summary.write(text)
+
+
+def enabled(name, default=False):
+    value = os.environ.get(name)
+    return default if value is None else value.casefold() == "true"
+
+
+def configured_feeds():
+    feeds = []
+    if enabled("PUSH_TO_NUGET", True):
+        feeds.append(("NuGet.org", "https://api.nuget.org/v3/index.json", os.environ.get("NUGET_API_KEY", "")))
+    if enabled("PUSH_TO_GITHUB", True):
+        feeds.append((
+            "GitHub Packages",
+            f"https://nuget.pkg.github.com/{os.environ['GITHUB_REPOSITORY_OWNER']}/index.json",
+            os.environ.get("GITHUB_PACKAGES_TOKEN", ""),
+        ))
+    if enabled("PUSH_TO_CUSTOM_FEEDS"):
+        urls = [url.strip() for url in os.environ.get("CUSTOM_FEED_URLS", "").splitlines() if url.strip()]
+        if not urls:
+            raise ValueError("push-to-custom-feeds requires at least one custom-feed-url")
+        keys = os.environ.get("CUSTOM_FEED_API_KEYS", "").splitlines()
+        feeds.extend((f"Custom feed {index}", url, keys[index - 1] if index <= len(keys) else "")
+                     for index, url in enumerate(urls, start=1))
+    return feeds
+
+
+def publish():
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    feeds = configured_feeds()
+    nuget_feed = next((feed for feed in feeds if feed[0] == "NuGet.org"), None)
+    newly_uploaded = []
+    results = []
+    has_failures = False
+
+    for package in manifest:
+        package_path = Path(package["path"])
+        statuses = {}
+        for feed, url, key in feeds:
+            status = push(package_path, feed, url, key, no_symbols=True)
+            statuses[feed] = status
+            has_failures |= status in ("failed", "unconfirmed")
+
+        # A symbols-only upload does not make a package newly published.
+        symbol_path = package_path.with_suffix(".snupkg")
+        if symbol_path.exists() and nuget_feed:
+            _, url, key = nuget_feed
+            symbol_status = push(symbol_path, "NuGet.org symbols", url, key)
+            statuses["NuGet.org symbols"] = symbol_status
+            has_failures |= symbol_status in ("failed", "unconfirmed")
+
+        results.append({"id": package["id"], "version": package["version"], "feeds": statuses})
+        if any(status == "uploaded" for feed, status in statuses.items() if feed != "NuGet.org symbols"):
+            newly_uploaded.append(package)
+
+    PUBLISH_RESULTS.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    NEWLY_UPLOADED.write_text(json.dumps(newly_uploaded, indent=2, ensure_ascii=False), encoding="utf-8")
+    append_output("has-new", str(bool(newly_uploaded)).lower())
+    append_output("has-failures", str(has_failures).lower())
+
+    feed_names = [feed[0] for feed in feeds]
+    headings = ["Package", *feed_names]
+    if nuget_feed:
+        headings.append("Symbols")
+    lines = ["## NuGet publishing", "", f"| {' | '.join(headings)} |", f"| {' | '.join('---' for _ in headings)} |"]
+    for result in results:
+        statuses = result["feeds"]
+        values = [f"{result['id']} {result['version']}", *(statuses.get(feed, "not selected") for feed in feed_names)]
+        if nuget_feed:
+            values.append(statuses.get("NuGet.org symbols", "none"))
+        lines.append(f"| {' | '.join(values)} |")
+    lines.extend(["", f"Newly uploaded packages: {len(newly_uploaded)}.", ""])
+    append_summary("\n".join(lines))
+
+
+def compose_release_notes(packages):
+    main = select_main_package(packages)
+    sections = [main["notes"] or "*No release notes provided.*"]
+    for package in sorted((package for package in packages if package is not main), key=lambda item: item["id"].casefold()):
+        notes = package["notes"] or "*No release notes provided.*"
+        sections.append(f"## {package['id']} {package['version']}\n\n{notes}")
+    repository = os.environ["GITHUB_REPOSITORY"]
+    run_id = os.environ["GITHUB_RUN_ID"]
+    sections.append(f"Assets were automatically generated using the [publish workflow](<https://github.com/{repository}/actions/runs/{run_id}>).")
+    return "\n\n".join(sections) + "\n"
+
+
+def version_key(package):
+    core, _, prerelease = package["version"].split("+", 1)[0].partition("-")
+    numbers = tuple(int(part) for part in core.split("."))
+    return numbers, not prerelease, prerelease
+
+
+def select_main_package(packages):
+    main_project = os.environ.get("MAIN_PROJECT", "").strip().casefold()
+    if main_project:
+        return next((
+            package for package in packages
+            if package["id"].casefold() == main_project
+            or Path(package.get("project", "")).parent.name.casefold() == main_project
+        ), None) or max(packages, key=version_key)
+    return max(packages, key=version_key)
+
+
+def release():
+    packages = json.loads(NEWLY_UPLOADED.read_text(encoding="utf-8"))
+    if not packages:
+        return
+
+    RELEASE_NOTES.write_text(compose_release_notes(packages), encoding="utf-8")
+    main = select_main_package(packages)
+    tag = os.environ["GITHUB_REF_NAME"] if os.environ.get("GITHUB_REF_TYPE") == "tag" else f"v{main['version']}"
+    title = f"{os.environ.get('RELEASE_TITLE_PREFIX', '')}{tag.removeprefix('v')}"
+
+    assets = []
+    if enabled("UPLOAD_TO_RELEASE", True):
+        for package in packages:
+            package_path = Path(package["path"])
+            assets.append(str(package_path))
+            symbol_path = package_path.with_suffix(".snupkg")
+            if symbol_path.exists():
+                assets.append(str(symbol_path))
+
+    command = [
+        "gh", "release", "create", tag, *assets,
+        "--title", title, "--notes-file", str(RELEASE_NOTES),
+        "--target", os.environ["GITHUB_SHA"], "--repo", os.environ["GITHUB_REPOSITORY"],
+    ]
+    if os.environ.get("GITHUB_REF_TYPE") == "tag":
+        command.append("--verify-tag")
+    result = run(command)
+    if result.returncode:
+        raise RuntimeError(f"GitHub release creation failed: {result.stderr}")
+    url = result.stdout.strip()
+    print(f"Created {url} with {len(packages)} newly uploaded packages")
+    append_output("created", "true")
+    append_output("url", url)
+
+
+def compose_discord_message(packages, release_url, nuget_available):
+    main = select_main_package(packages)
+    main_section = [f"## {main['id']} {main['version']}"]
+    if top_lines := os.environ.get("DISCORD_TOP_LINES", "").strip():
+        main_section.append(top_lines)
+    main_section.append(main["notes"] or "*No release notes provided.*")
+    sections = ["\n\n".join(main_section)]
+
+    for package in packages:
+        if package is main:
+            continue
+        notes = package["notes"] or "*No release notes provided.*"
+        sections.append(f"### {package['id']} {package['version']}\n\n{notes}")
+
+    links = [f"GitHub: <{release_url}>"]
+    if nuget_available:
+        nuget_url = f"https://www.nuget.org/packages/{main['id']}/{main['version']}"
+        links.append(f"NuGet: <{nuget_url}>")
+    sections.append("\n".join(links))
+    if bottom_lines := os.environ.get("DISCORD_BOTTOM_LINES", "").strip():
+        sections.append(bottom_lines)
+    return "\n\n".join(sections) + "\n"
+
+
+def utf16_length(value):
+    return len(value.encode("utf-16-le")) // 2
+
+
+def split_discord_message(message, limit=1900):
+    chunk = ""
+    for line in message.splitlines(keepends=True):
+        if not chunk:
+            if utf16_length(line) > limit:
+                raise ValueError("A Discord message line exceeds the limit and cannot be split at a line break")
+            chunk = line
+        elif utf16_length(chunk + line) <= limit:
+            chunk += line
+        else:
+            yield chunk
+            if utf16_length(line) > limit:
+                raise ValueError("A Discord message line exceeds the limit and cannot be split at a line break")
+            chunk = line
+    if chunk:
+        yield chunk
+
+
+def discord():
+    webhook = os.environ.get("DISCORD_WEBHOOK_URL")
+    if not webhook:
+        raise ValueError("DISCORD_WEBHOOK_URL is not configured")
+    packages = json.loads(NEWLY_UPLOADED.read_text(encoding="utf-8"))
+    results = json.loads(PUBLISH_RESULTS.read_text(encoding="utf-8"))
+    main = select_main_package(packages)
+    nuget_available = any(
+        result["id"] == main["id"] and result["version"] == main["version"]
+        and result["feeds"].get("NuGet.org") in ("uploaded", "duplicate")
+        for result in results
+    )
+    message = compose_discord_message(packages, os.environ["RELEASE_URL"], nuget_available)
+    # Validate every line before constructing a webhook client, so an overlong line cannot cause a partial announcement.
+    chunks = list(split_discord_message(message))
+    opener = urllib.request.build_opener()
+    opener.addheaders = []
+    for chunk in chunks:
+        payload = json.dumps({"content": chunk}).encode("utf-8")
+        for attempt in range(4):
+            request = urllib.request.Request(webhook, payload, {
+                "Content-Type": "application/json",
+            }, method="POST")
+            try:
+                with opener.open(request, timeout=30):
+                    break
+            except urllib.error.HTTPError as error:
+                if error.code == 429 and attempt < 3:
+                    time.sleep(float(error.headers.get("Retry-After", "1")))
+                    continue
+                body = error.read().decode("utf-8", errors="replace").strip()
+                try:
+                    detail = json.loads(body).get("message", body)
+                except json.JSONDecodeError:
+                    detail = body
+                suffix = f": {detail}" if detail else ""
+                raise RuntimeError(f"Discord webhook request failed with HTTP {error.code}{suffix}") from None
+
+
+if __name__ == "__main__":
+    operations = {"prepare": prepare, "publish": publish, "release": release, "discord": discord}
+    if len(sys.argv) != 2 or sys.argv[1] not in operations:
+        sys.exit(f"Usage: {sys.argv[0]} <{'|'.join(operations)}>")
+    operations[sys.argv[1]]()
