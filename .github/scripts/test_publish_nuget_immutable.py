@@ -100,7 +100,7 @@ class PublishNugetTests(unittest.TestCase):
         with patch.dict(os.environ, environment):
             notes = target.compose_release_notes(packages)
         self.assertEqual(
-            "Fixed a bug.\n\n## Package.Y 9.0.0\n\nAdded a feature.\n\n"
+            "Fixed a bug.\n\n### Package.Y 9.0.0\n\nAdded a feature.\n\n"
             "Assets were automatically generated using the "
             "[publish workflow](<https://github.com/owner/repo/actions/runs/123>).\n",
             notes,
@@ -120,8 +120,8 @@ class PublishNugetTests(unittest.TestCase):
         with patch.dict(os.environ, environment):
             self.assertEqual("Package.Y", target.select_main_package(packages)["id"])
             self.assertEqual(
-                "## Package.X 2.0.0\n\nFixed a bug.\n\n"
-                "## Package.Y 9.0.0\n\nAdded a feature.\n\n"
+                "### Package.X 2.0.0\n\nFixed a bug.\n\n"
+                "### Package.Y 9.0.0\n\nAdded a feature.\n\n"
                 "Assets were automatically generated using the "
                 "[publish workflow](<https://github.com/owner/repo/actions/runs/123>).\n",
                 target.compose_release_notes(packages),
