@@ -231,7 +231,7 @@ def compose_release_notes(packages):
         sections.append(main["notes"] or "*No release notes provided.*")
     for package in sorted((package for package in packages if package is not main), key=lambda item: item["id"].casefold()):
         notes = package["notes"] or "*No release notes provided.*"
-        sections.append(f"## {package['id']} {package['version']}\n\n{notes}")
+        sections.append(f"### {package['id']} {package['version']}\n\n{notes}")
     repository = os.environ["GITHUB_REPOSITORY"]
     run_id = os.environ["GITHUB_RUN_ID"]
     sections.append(f"Assets were automatically generated using the [publish workflow](<https://github.com/{repository}/actions/runs/{run_id}>).")
