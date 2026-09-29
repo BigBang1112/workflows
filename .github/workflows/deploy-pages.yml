@@ -23,6 +23,10 @@ on:
         description: Generate HTML coverage report and publish it to /coverage/ on the site
         type: boolean
         default: false
+      use-microsoft-testing-platform:
+        description: Use Microsoft Testing Platform coverage arguments (requires MTP selected in global.json)
+        type: boolean
+        default: false
       patch-base:
         description: Patch the base href in index.html and service-worker.published.js to the repository name
         type: boolean
@@ -85,7 +89,7 @@ jobs:
       - name: Test
         if: inputs.enable-coverage
         continue-on-error: true
-        run: dotnet test -c Release --collect:"XPlat Code Coverage" --results-directory ./coverage
+        run: dotnet test -c Release ${{ inputs.use-microsoft-testing-platform && '--coverage --coverage-output-format cobertura' || '--collect:"XPlat Code Coverage"' }} --results-directory ./coverage
 
       - name: Patch base href in index.html
         if: inputs.patch-base
