@@ -85,7 +85,7 @@ jobs:
         run: dotnet build -c Release --no-restore -p:ContinuousIntegrationBuild=true ${{ inputs.build-args }}
 
       - name: Test with VSTest
-        if: !inputs.use-microsoft-testing-platform
+        if: inputs.use-microsoft-testing-platform == false
         run: dotnet test -c Release --no-build ${{ inputs.enable-coverage && '--collect:"XPlat Code Coverage" --results-directory ./coverage' || '' }} ${{ inputs.test-args }}
 
       - name: Test with Microsoft Testing Platform
