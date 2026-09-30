@@ -87,7 +87,7 @@ jobs:
         if: inputs.enable-coverage
         run: |
           dotnet tool install -g dotnet-reportgenerator-globaltool
-          reportgenerator -reports:"./coverage/**/coverage.cobertura.xml" -targetdir:"./coveragereport" -reporttypes:"MarkdownSummaryGithub"
+          reportgenerator -reports:"./coverage/**/*.cobertura.xml" -targetdir:"./coveragereport" -reporttypes:"MarkdownSummaryGithub"
 
       - name: Publish Coverage to Job Summary
         if: inputs.enable-coverage
