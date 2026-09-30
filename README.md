@@ -34,6 +34,7 @@ Builds and tests a .NET solution across one or more OS runners with optional cod
 | `os` | JSON array of runners | `["ubuntu-latest", "windows-latest"]` |
 | `build-args` | Extra `dotnet build` arguments | |
 | `test-args` | Extra `dotnet test` arguments | |
+| `use-microsoft-testing-platform` | Use MTP coverage arguments; requires MTP selected in `global.json` | `false` |
 | `enable-coverage` | Generate and publish coverage summary | `true` |
 | `enable-cache` | Cache NuGet packages | `true` |
 
@@ -50,6 +51,7 @@ Requires `pages: write` and `id-token: write` permissions on the caller.
 | `workloads` | Comma-separated workloads to install | `wasm-tools` |
 | `enable-cache` | Cache NuGet packages | `true` |
 | `enable-coverage` | Generate HTML report at `/coverage/` on the site | `false` |
+| `use-microsoft-testing-platform` | Use MTP coverage arguments; requires MTP selected in `global.json` | `false` |
 | `patch-base` | Patch `<base href>` in `index.html` and `service-worker.published.js` to the repository name | `true` |
 
 ### `docker-publish.yml` — Publish Docker Images
@@ -84,6 +86,7 @@ During packing, each project's `PackageReleaseNotes` is set from its `[project-f
 | `workloads` | Comma-separated workloads to install | |
 | `enable-tests` | Run tests | `true` |
 | `enable-coverage` | Generate and publish coverage summary | `true` |
+| `use-microsoft-testing-platform` | Use MTP coverage arguments; requires MTP selected in `global.json` | `false` |
 | `push-to-nuget` | Publish to NuGet.org | `true` |
 | `push-to-github` | Publish to GitHub Packages | `true` |
 | `push-to-custom-feeds` | Publish to custom NuGet feeds (requires `custom-feed-urls` and `CUSTOM_FEED_API_KEYS`) | `false` |
@@ -119,6 +122,7 @@ Release notes come directly from each project's `<PackageReleaseNotes>` MSBuild 
 | `workloads` | Comma-separated workloads to install | |
 | `enable-tests` | Run tests | `true` |
 | `enable-coverage` | Generate and publish coverage summary when tests run | `true` |
+| `use-microsoft-testing-platform` | Use MTP coverage arguments; requires MTP selected in `global.json` | `false` |
 | `push-to-nuget` | Publish to NuGet.org | `true` |
 | `push-to-github` | Publish to GitHub Packages | `true` |
 | `push-to-custom-feeds` | Publish to custom NuGet feeds (requires `custom-feed-urls` and `CUSTOM_FEED_API_KEYS`) | `false` |

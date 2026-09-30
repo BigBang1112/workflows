@@ -35,6 +35,10 @@ on:
         description: Generate and publish code coverage summary
         type: boolean
         default: true
+      use-microsoft-testing-platform:
+        description: Use Microsoft Testing Platform coverage arguments (requires MTP selected in global.json)
+        type: boolean
+        default: false
       push-to-nuget:
         description: Publish packages to NuGet.org
         type: boolean
@@ -125,12 +129,20 @@ jobs:
       - name: Test
         if: inputs.enable-tests
         run: |
+          test_args=()
+          if [ "${{ inputs.enable-coverage }}" = "true" ]; then
+            if [ "${{ inputs.use-microsoft-testing-platform }}" = "true" ]; then
+              test_args=(--coverage --coverage-output-format cobertura --results-directory ./coverage)
+            else
+              test_args=(--collect:"XPlat Code Coverage" --results-directory ./coverage)
+            fi
+          fi
           if [ -n "${{ inputs.test-path }}" ]; then
             for project in ${{ inputs.test-path }}; do
-              dotnet test "$project" -c Release --collect:"XPlat Code Coverage" --results-directory ./coverage
+              dotnet test "$project" -c Release "${test_args[@]}"
             done
           else
-            dotnet test -c Release --collect:"XPlat Code Coverage" --results-directory ./coverage
+            dotnet test -c Release "${test_args[@]}"
           fi
 
       - name: Generate Code Coverage Summary
