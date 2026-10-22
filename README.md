@@ -295,6 +295,8 @@ Tests this repository. It lints every workflow file with [actionlint](https://gi
 - `publish-nuget-immutable.yml` publishes to a folder feed in the workspace, without a release or Discord message. A follow-up job checks the `has-new` output and the uploaded packages.
 - `check-agent-authorship.yml` does a dry run against pull request #41 of this repository. A follow-up job checks that the result is `none`.
 
+The `validate` job passes only when every other job passed. It is the required status check for pull requests into `main`.
+
 It runs on pull requests and pushes to `main` and isn't meant to be called from other repositories.
 
 ## Testing locally
