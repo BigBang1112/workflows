@@ -36,6 +36,18 @@ public sealed class AnnouncementTests
     }
 
     [TestMethod]
+    public void ReleaseNotes_DescriptionComesFirst()
+    {
+        var notes = Announcement.ReleaseNotes(
+            [Package("Package.Y", "9.0.0", "Added a feature."), Package("Package.X", "1.0.0", "Fixed a bug.")],
+            "Package.X",
+            RunUrl,
+            "  A big release!\n");
+
+        Assert.AreEqual("A big release!\n\nFixed a bug.\n\n### Package.Y 9.0.0\n\nAdded a feature.\n\n" + Footer, notes);
+    }
+
+    [TestMethod]
     public void ReleaseNotes_MissingNotesArePlaceholder()
     {
         var notes = Announcement.ReleaseNotes([Package("A", "1.0.0")], "A", RunUrl);

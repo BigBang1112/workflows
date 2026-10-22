@@ -26,7 +26,8 @@ internal sealed class ReleaseCommand(ActionsContext context, IProcessRunner proc
 
         var mainProject = context.Get("MAIN_PROJECT");
         var runUrl = $"{ServerUrl()}/{context.Require("GITHUB_REPOSITORY")}/actions/runs/{context.Require("GITHUB_RUN_ID")}";
-        await File.WriteAllTextAsync(state.ReleaseNotesPath, Announcement.ReleaseNotes(packages, mainProject, runUrl));
+        var notes = Announcement.ReleaseNotes(packages, mainProject, runUrl, context.Get("RELEASE_DESCRIPTION"));
+        await File.WriteAllTextAsync(state.ReleaseNotesPath, notes);
 
         var isTag = context.Get("GITHUB_REF_TYPE") == "tag";
         var tag = isTag ? context.Require("GITHUB_REF_NAME") : $"v{Announcement.SelectMainPackage(packages, mainProject).Version}";

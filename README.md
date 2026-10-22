@@ -121,7 +121,7 @@ jobs:
 | `project-path` | Newline-separated project paths or globs to build | `""` (repository root) |
 | `test-path` | Newline-separated test project paths or globs | `""` (repository root) |
 | `pack-path` | Newline-separated project paths or globs to pack | `""` (`project-path`, then repository root) |
-| `dotnet-version` | .NET SDK version to install. When empty, the SDK from `global.json` in the repository root is used, or the runner's preinstalled SDK if there is none. | `""` |
+| `dotnet-version` | .NET SDK versions to install, one per line. Install every version the test projects target. When empty, the SDK from `global.json` in the repository root is used, or the runner's preinstalled SDK if there is none. | `""` |
 | `workloads` | Comma-separated workloads to install | `""` |
 | `enable-tests` | Run tests | `true` |
 | `enable-coverage` | Collect Cobertura coverage into `$RUNNER_TEMP/coverage` when tests run | `true` |
@@ -132,6 +132,7 @@ jobs:
 | `upload-to-release` | Attach the newly uploaded `.nupkg` and `.snupkg` files to the release | `true` |
 | `main-project` | Package ID or project directory name of the main package (see [Release notes](#release-notes)) | `""` |
 | `create-release` | Create a GitHub release for the newly uploaded packages | `true` |
+| `release-description` | Text placed before the release notes in the release | `""` |
 | `send-discord-message` | Post the release notes to Discord after the release is created | `false` |
 | `discord-top-lines` | Newline-separated lines inserted below the heading, before the release notes, in the Discord message | `""` |
 | `discord-bottom-lines` | Newline-separated lines appended at the very end of the Discord message | `""` |
@@ -148,6 +149,50 @@ jobs:
 | `has-new` | `true` when at least one package was uploaded for the first time |
 | `release-url` | URL of the created GitHub release |
 
+#### Several packages
+
+A repository with libraries in `Src`, tests in `Tests`, and a template package next to them can publish everything in one release. The test projects target several frameworks, so every SDK they need is installed. A `workflow_dispatch` description goes to both the release and the Discord message:
+
+```yaml
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      description:
+        description: Text before the release notes
+        type: string
+        default: ""
+
+jobs:
+  publish:
+    uses: bigbang1112/workflows/.github/workflows/publish-nuget-immutable.yml@main
+    permissions:
+      contents: write
+      packages: write
+    with:
+      dotnet-version: |
+        10.0.x
+        9.0.x
+        8.0.x
+      project-path: Src/*/*.csproj
+      test-path: Tests/*/*.csproj
+      pack-path: |
+        Src/*/*.csproj
+        Templates/MyLibrary.Templates.csproj
+      main-project: MyLibrary
+      release-title-prefix: MyLibrary
+      release-description: ${{ inputs.description }}
+      push-to-custom-feeds: true
+      custom-feed-urls: https://nuget.example.com/v3/index.json
+      send-discord-message: true
+      discord-top-lines: ${{ inputs.description }}
+    secrets:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      CUSTOM_FEED_API_KEYS: ${{ secrets.MY_FEED_API_KEY }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+```
+
 #### Publishing
 
 Every package is pushed to each selected feed, and its `.snupkg` symbols go to NuGet.org. The job summary has a table with the result for each feed:
@@ -163,7 +208,7 @@ The packed packages are also kept as the `nuget-packages` artifact.
 
 #### Release notes
 
-Each package's notes come from the `PackageReleaseNotes` property of the project that produced it. The workflow matches packages to projects by the package's actual ID and version, and removes the indentation from notes written over several lines:
+Each package's notes come from the `PackageReleaseNotes` property of the project that produced it. The workflow matches packages to projects by the package's actual ID and version (`PackageVersion`, which `VersionPrefix` and `VersionSuffix` set by default), and removes the indentation from notes written over several lines:
 
 ```xml
 <PackageReleaseNotes>
@@ -172,7 +217,7 @@ Each package's notes come from the `PackageReleaseNotes` property of the project
 </PackageReleaseNotes>
 ```
 
-With `main-project`, that package's notes come first without a heading, and its version names the release. Every other package gets a `### [ID] [Version]` heading. Without it, every package has a heading and the highest version names the release.
+`release-description` comes first. With `main-project`, that package's notes follow without a heading, and its version names the release. Every other package gets a `### [ID] [Version]` heading. Without it, every package has a heading and the highest version names the release.
 
 The release tag is the pushed tag when the workflow runs for one (and the release then requires that tag to exist). Otherwise, it is `v` followed by the main package's version.
 

@@ -37,7 +37,7 @@ internal sealed class PackCommand(ActionsContext context, IProcessRunner process
         {
             var properties = await ReadPropertiesAsync(project);
             var id = properties.GetValueOrDefault("PackageId") is { Length: > 0 } packageId ? packageId : Path.GetFileNameWithoutExtension(project);
-            var key = (id.ToLowerInvariant(), PackageVersion.Normalize(properties.GetValueOrDefault("Version", "")));
+            var key = (id.ToLowerInvariant(), PackageVersion.Normalize(properties.GetValueOrDefault("PackageVersion", "")));
 
             projectsByIdentity.TryAdd(key, []);
             projectsByIdentity[key].Add((project, properties.GetValueOrDefault("PackageReleaseNotes", "")));
@@ -88,7 +88,9 @@ internal sealed class PackCommand(ActionsContext context, IProcessRunner process
         [
             "msbuild", project, "-nologo",
             "-property:Configuration=Release", "-property:ContinuousIntegrationBuild=true",
-            "-getProperty:PackageId,Version,PackageReleaseNotes",
+            // PackageVersion is the version dotnet pack writes. It defaults to Version, which is
+            // built from VersionPrefix and VersionSuffix.
+            "-getProperty:PackageId,PackageVersion,PackageReleaseNotes",
         ], echo: false);
 
         if (result.ExitCode != 0)

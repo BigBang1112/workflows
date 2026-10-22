@@ -12,7 +12,7 @@ public sealed class PackCommandTests
     {
         var json = System.Text.Json.JsonSerializer.Serialize(new
         {
-            Properties = new { PackageId = id, Version = version, PackageReleaseNotes = notes },
+            Properties = new { PackageId = id, PackageVersion = version, PackageReleaseNotes = notes },
         });
         return FakeProcessRunner.Success(json);
     }
@@ -148,7 +148,7 @@ public sealed class PackCommandTests
             new[]
             {
                 $"dotnet pack {Path.Combine("src", "Lib")} -c Release -p:ContinuousIntegrationBuild=true --output {runner.State.PackagesDirectory}",
-                $"dotnet msbuild {Path.Combine("src", "Lib", "Lib.csproj")} -nologo -property:Configuration=Release -property:ContinuousIntegrationBuild=true -getProperty:PackageId,Version,PackageReleaseNotes",
+                $"dotnet msbuild {Path.Combine("src", "Lib", "Lib.csproj")} -nologo -property:Configuration=Release -property:ContinuousIntegrationBuild=true -getProperty:PackageId,PackageVersion,PackageReleaseNotes",
             },
             processes.CommandLines.ToList());
     }

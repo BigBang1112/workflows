@@ -20,7 +20,7 @@ on:
         type: string
         default: ""
       dotnet-version:
-        description: .NET SDK version to install (e.g. 10.0.x). When empty, the SDK from global.json in the repository root is used, or the runner's preinstalled SDK if there is none.
+        description: .NET SDK versions to install, one per line (e.g. 10.0.x). Install every version the test projects target, so their runtimes are available. When empty, the SDK from global.json in the repository root is used, or the runner's preinstalled SDK if there is none.
         type: string
         default: ""
       workloads:
@@ -63,6 +63,10 @@ on:
         description: Create one GitHub release for the packages newly uploaded in this run
         type: boolean
         default: true
+      release-description:
+        description: Text placed before the release notes in the GitHub release
+        type: string
+        default: ""
       send-discord-message:
         description: Post the release notes to Discord after the release is created
         type: boolean
@@ -216,6 +220,7 @@ jobs:
           MAIN_PROJECT: ${{ inputs.main-project }}
           UPLOAD_TO_RELEASE: ${{ inputs.upload-to-release }}
           RELEASE_TITLE_PREFIX: ${{ inputs.release-title-prefix }}
+          RELEASE_DESCRIPTION: ${{ inputs.release-description }}
         run: dotnet "$WORKFLOW_TOOLS" nuget release
 
       - name: Send Discord message

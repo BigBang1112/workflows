@@ -23,13 +23,18 @@ internal static class Announcement
     }
 
     /// <summary>
-    /// With a main project, its notes come first without a heading. Every other package gets a
-    /// "### ID Version" heading, sorted by ID. A link to the workflow run comes last.
+    /// The description comes first. With a main project, its notes follow without a heading. Every other
+    /// package gets a "### ID Version" heading, sorted by ID. A link to the workflow run comes last.
     /// </summary>
-    public static string ReleaseNotes(IReadOnlyList<PackageEntry> packages, string mainProject, string runUrl)
+    public static string ReleaseNotes(IReadOnlyList<PackageEntry> packages, string mainProject, string runUrl, string description = "")
     {
         var main = mainProject.Trim().Length > 0 ? SelectMainPackage(packages, mainProject) : null;
         var sections = new List<string>();
+
+        if (description.Trim() is { Length: > 0 } trimmedDescription)
+        {
+            sections.Add(trimmedDescription);
+        }
 
         if (main is not null)
         {
