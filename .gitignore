@@ -1,0 +1,10 @@
+# .NET build output
+**/[Bb]in/
+**/[Oo]bj/
+**/TestResults/
+
+# act artifact server
+/.act/
+
+# Packages pushed to the local test feed
+/tests/fixtures/nuget/feed/*.nupkg

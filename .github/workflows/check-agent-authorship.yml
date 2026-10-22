@@ -1,0 +1,89 @@
+name: Check AI Agent Authorship
+
+on:
+  workflow_call:
+    inputs:
+      pull-request:
+        description: Number of the pull request to check. Defaults to the pull request that triggered the workflow.
+        type: number
+      agent-patterns:
+        description: Newline-separated regular expressions for more AI agent identities, matched case-insensitively against logins and "Name <email>"
+        type: string
+        default: ""
+      close-agent-pull-requests:
+        description: Close pull requests created entirely by an AI agent
+        type: boolean
+        default: true
+      dry-run:
+        description: Only report the result, without commenting or closing
+        type: boolean
+        default: false
+    outputs:
+      result:
+        description: none, co-authored, or agent-only
+        value: ${{ jobs.check.outputs.result }}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  check:
+    name: Check AI agent authorship
+    runs-on: ubuntu-latest
+
+    outputs:
+      result: ${{ steps.check.outputs.result }}
+
+    defaults:
+      run:
+        shell: bash
+
+    # The pull request's code is never checked out or run, so this is safe with pull_request_target.
+    steps:
+      - name: Checkout workflow tools
+        if: ${{ !env.ACT }}
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .workflow-tools
+          sparse-checkout: tools
+
+      # act (local testing) doesn't provide the job.workflow_* context. It only runs this
+      # repository's own tests, where the tools are in the workspace.
+      - name: Checkout
+        if: ${{ env.ACT }}
+        uses: actions/checkout@v7
+
+      - name: Copy workflow tools
+        if: ${{ env.ACT }}
+        run: mkdir .workflow-tools && cp -r tools .workflow-tools/
+
+      - name: Move workflow tools out of the workspace
+        run: mv .workflow-tools "$RUNNER_TEMP/workflow-tools"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build workflow tools
+        working-directory: ${{ runner.temp }}/workflow-tools
+        run: |
+          dotnet build tools/Workflows.Tools -c Release -o bin
+          echo "WORKFLOW_TOOLS=$PWD/bin/Workflows.Tools.dll" >> "$GITHUB_ENV"
+
+      - name: Check pull request
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PULL_REQUEST: ${{ inputs.pull-request || github.event.pull_request.number }}
+          AGENT_PATTERNS: ${{ inputs.agent-patterns }}
+          CLOSE_AGENT_PULL_REQUESTS: ${{ inputs.close-agent-pull-requests }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: dotnet "$WORKFLOW_TOOLS" pull-request check-agent-authorship

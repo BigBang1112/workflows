@@ -1,0 +1,236 @@
+name: Publish NuGet Packages (Immutable Release)
+
+on:
+  workflow_call:
+    inputs:
+      package-prefix:
+        description: Only publish packages whose ID starts with this prefix (e.g. MyCompany.)
+        type: string
+        default: ""
+      project-path:
+        description: Newline-separated project paths or globs to build. Defaults to the solution or project in the repository root.
+        type: string
+        default: ""
+      test-path:
+        description: Newline-separated test project paths or globs. Defaults to the solution or project in the repository root.
+        type: string
+        default: ""
+      pack-path:
+        description: Newline-separated project paths or globs to pack. Defaults to project-path, then the repository root.
+        type: string
+        default: ""
+      dotnet-version:
+        description: .NET SDK version to install (e.g. 10.0.x). When empty, the SDK from global.json in the repository root is used, or the runner's preinstalled SDK if there is none.
+        type: string
+        default: ""
+      workloads:
+        description: Comma-separated .NET workloads to install (e.g. wasm-tools)
+        type: string
+        default: ""
+      enable-tests:
+        description: Run tests
+        type: boolean
+        default: true
+      enable-coverage:
+        description: Collect Cobertura code coverage into $RUNNER_TEMP/coverage when tests run
+        type: boolean
+        default: true
+      push-to-nuget:
+        description: Publish packages to NuGet.org
+        type: boolean
+        default: true
+      push-to-github:
+        description: Publish packages to GitHub Packages
+        type: boolean
+        default: true
+      push-to-custom-feeds:
+        description: Publish packages to custom NuGet feeds (requires custom-feed-urls and CUSTOM_FEED_API_KEYS)
+        type: boolean
+        default: false
+      custom-feed-urls:
+        description: Newline-separated list of custom NuGet feed source URLs
+        type: string
+        default: ""
+      upload-to-release:
+        description: Attach the newly uploaded .nupkg and .snupkg files to the GitHub release
+        type: boolean
+        default: true
+      main-project:
+        description: Package ID or project directory name of the main package, used for the release version and the unheaded first release notes section. When empty, the highest version determines the release version and every section has a heading.
+        type: string
+        default: ""
+      create-release:
+        description: Create one GitHub release for the packages newly uploaded in this run
+        type: boolean
+        default: true
+      send-discord-message:
+        description: Post the release notes to Discord after the release is created
+        type: boolean
+        default: false
+      discord-top-lines:
+        description: Newline-separated lines inserted below the heading, before the release notes, in the Discord message
+        type: string
+        default: ""
+      discord-bottom-lines:
+        description: Newline-separated lines appended at the very end of the Discord message
+        type: string
+        default: ""
+      release-title-prefix:
+        description: Text before the version in the GitHub release title, separated by one space
+        type: string
+        default: ""
+    secrets:
+      NUGET_API_KEY:
+        description: NuGet.org API key
+        required: false
+      CUSTOM_FEED_API_KEYS:
+        description: Newline-separated API keys in the same order as custom-feed-urls
+        required: false
+      DISCORD_WEBHOOK_URL:
+        description: Discord webhook URL for the release announcement
+        required: false
+    outputs:
+      has-new:
+        description: true when at least one package was uploaded for the first time
+        value: ${{ jobs.publish.outputs.has-new }}
+      release-url:
+        description: URL of the created GitHub release
+        value: ${{ jobs.publish.outputs.release-url }}
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: publish-nuget-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  publish:
+    name: Build, test, and publish NuGet packages
+    runs-on: ubuntu-latest
+
+    outputs:
+      has-new: ${{ steps.publish.outputs.has-new }}
+      release-url: ${{ steps.release.outputs.url }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # A reusable workflow only checks out the caller's repository. The tools come from the
+      # exact commit of this workflow, so callers don't need copies of them.
+      - name: Checkout workflow tools
+        if: ${{ !env.ACT }}
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .workflow-tools
+          sparse-checkout: tools
+
+      # act (local testing) doesn't provide the job.workflow_* context. It only runs this
+      # repository's own tests, where the tools are already in the workspace.
+      - name: Copy workflow tools
+        if: ${{ env.ACT }}
+        run: mkdir .workflow-tools && cp -r tools .workflow-tools/
+
+      # Outside the workspace, the caller's global.json and MSBuild files don't affect the tools,
+      # and the tools' projects don't match the caller's project globs.
+      - name: Move workflow tools out of the workspace
+        run: mv .workflow-tools "$RUNNER_TEMP/workflow-tools"
+
+      - name: Setup .NET for workflow tools
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+          workloads: ${{ inputs.workloads }}
+
+      - name: Build workflow tools
+        working-directory: ${{ runner.temp }}/workflow-tools
+        run: |
+          dotnet build tools/Workflows.Tools -c Release -o bin
+          echo "WORKFLOW_TOOLS=$PWD/bin/Workflows.Tools.dll" >> "$GITHUB_ENV"
+
+      - name: Build
+        env:
+          PROJECT_PATH: ${{ inputs.project-path }}
+        run: dotnet "$WORKFLOW_TOOLS" nuget build
+
+      - name: Test
+        if: inputs.enable-tests
+        env:
+          TEST_PATH: ${{ inputs.test-path }}
+          ENABLE_COVERAGE: ${{ inputs.enable-coverage }}
+        run: dotnet "$WORKFLOW_TOOLS" nuget test
+
+      - name: Pack
+        id: pack
+        env:
+          PACK_PATH: ${{ inputs.pack-path }}
+          PROJECT_PATH: ${{ inputs.project-path }}
+          PACKAGE_PREFIX: ${{ inputs.package-prefix }}
+        run: dotnet "$WORKFLOW_TOOLS" nuget pack
+
+      - name: Publish
+        id: publish
+        env:
+          PUSH_TO_NUGET: ${{ inputs.push-to-nuget }}
+          PUSH_TO_GITHUB: ${{ inputs.push-to-github }}
+          PUSH_TO_CUSTOM_FEEDS: ${{ inputs.push-to-custom-feeds }}
+          CUSTOM_FEED_URLS: ${{ inputs.custom-feed-urls }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          GITHUB_PACKAGES_TOKEN: ${{ github.token }}
+          CUSTOM_FEED_API_KEYS: ${{ secrets.CUSTOM_FEED_API_KEYS }}
+        run: dotnet "$WORKFLOW_TOOLS" nuget publish
+
+      # Also runs when publishing failed, so the packed packages are always kept.
+      - name: Upload packages
+        if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget-packages
+          path: |
+            ${{ runner.temp }}/nuget-packages/${{ inputs.package-prefix }}*.nupkg
+            ${{ runner.temp }}/nuget-packages/${{ inputs.package-prefix }}*.snupkg
+          if-no-files-found: error
+
+      - name: Create release
+        id: release
+        if: steps.publish.outputs.has-new == 'true' && inputs.create-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAIN_PROJECT: ${{ inputs.main-project }}
+          UPLOAD_TO_RELEASE: ${{ inputs.upload-to-release }}
+          RELEASE_TITLE_PREFIX: ${{ inputs.release-title-prefix }}
+        run: dotnet "$WORKFLOW_TOOLS" nuget release
+
+      - name: Send Discord message
+        if: steps.release.outputs.created == 'true' && inputs.send-discord-message
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          MAIN_PROJECT: ${{ inputs.main-project }}
+          DISCORD_TOP_LINES: ${{ inputs.discord-top-lines }}
+          DISCORD_BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}
+        run: dotnet "$WORKFLOW_TOOLS" nuget discord
+
+      # Comes last, so packages that did upload still get their release.
+      - name: Report feed failures
+        if: steps.publish.outputs.has-failures == 'true'
+        run: |
+          echo "::error::One or more package feeds rejected an upload. See the job summary."
+          exit 1

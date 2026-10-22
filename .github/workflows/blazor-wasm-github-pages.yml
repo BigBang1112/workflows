@@ -1,0 +1,130 @@
+name: Deploy Blazor WebAssembly to GitHub Pages
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: Path to the Blazor WebAssembly project directory, relative to the repository root (e.g. src/MyApp)
+        type: string
+        required: true
+      dotnet-version:
+        description: .NET SDK version to install (e.g. 10.0.x). When empty, the SDK from global.json in the repository root is used, or the runner's preinstalled SDK if there is none.
+        type: string
+        default: ""
+      workloads:
+        description: Comma-separated .NET workloads to install
+        type: string
+        default: wasm-tools
+      base-path:
+        description: Path the site is served from, with a trailing slash (e.g. /my-repo/). When empty, it is read from the repository's GitHub Pages settings.
+        type: string
+        default: ""
+      enable-cache:
+        description: Cache NuGet packages
+        type: boolean
+        default: true
+      deploy:
+        description: Deploy the site. When false, the site is only built and uploaded as the github-pages artifact.
+        type: boolean
+        default: true
+    outputs:
+      page-url:
+        description: URL of the deployed site
+        value: ${{ jobs.deploy.outputs.page-url }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pages: read
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.project }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read GitHub Pages settings
+        id: pages
+        if: inputs.base-path == ''
+        uses: actions/configure-pages@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+          workloads: ${{ inputs.workloads }}
+
+      - name: Cache NuGet packages
+        if: inputs.enable-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      # The source files are patched before publishing, because the published service worker
+      # manifest contains hashes of these files.
+      - name: Set base path in index.html
+        env:
+          BASE_PATH: ${{ inputs.base-path || format('{0}/', steps.pages.outputs.base_path) }}
+        run: |
+          sed -i "s|<base href=\"/\" />|<base href=\"$BASE_PATH\" />|" wwwroot/index.html
+          grep -qF "<base href=\"$BASE_PATH\" />" wwwroot/index.html
+
+      - name: Set base path in service worker
+        if: hashFiles(format('{0}/wwwroot/service-worker.published.js', inputs.project)) != ''
+        env:
+          BASE_PATH: ${{ inputs.base-path || format('{0}/', steps.pages.outputs.base_path) }}
+        run: |
+          sed -i "s|const base = \"/\";|const base = \"$BASE_PATH\";|" wwwroot/service-worker.published.js
+          grep -qF "const base = \"$BASE_PATH\";" wwwroot/service-worker.published.js
+
+      - name: Publish
+        run: dotnet publish -c Release -o "${{ runner.temp }}/publish"
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ runner.temp }}/publish/wwwroot
+
+  deploy:
+    name: Deploy
+    if: inputs.deploy
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    # Deployments queue up instead of cancelling each other, so a started deployment always finishes.
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+
+    outputs:
+      page-url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
