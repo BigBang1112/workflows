@@ -1,0 +1,174 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: JSON array of runners for the end-to-end tests
+        type: string
+        default: '["ubuntu-latest", "windows-latest"]'
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Lint workflows
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+
+  tools:
+    name: Workflow tools
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test
+        run: dotnet test -c Release
+
+  dotnet-ci:
+    name: dotnet-ci (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: VSTest
+            working-directory: tests/fixtures/vstest
+            enable-coverage: true
+          - name: MTP
+            working-directory: tests/fixtures/mtp
+            enable-coverage: true
+          - name: MTP without coverage
+            working-directory: tests/fixtures/mtp
+            enable-coverage: false
+    uses: ./.github/workflows/dotnet-ci.yml
+    with:
+      dotnet-version: 10.0.x
+      os: ${{ inputs.os || '["ubuntu-latest", "windows-latest"]' }}
+      working-directory: ${{ matrix.working-directory }}
+      enable-coverage: ${{ matrix.enable-coverage }}
+
+  blazor-wasm-github-pages:
+    name: blazor-wasm-github-pages
+    uses: ./.github/workflows/blazor-wasm-github-pages.yml
+    # The called workflow declares these for its deploy job, which is skipped here.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    with:
+      project: tests/fixtures/blazor-wasm/BlazorApp
+      dotnet-version: 10.0.x
+      base-path: /fixture/
+      deploy: false
+
+  blazor-wasm-github-pages-site:
+    name: blazor-wasm-github-pages (check site)
+    needs: blazor-wasm-github-pages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download site
+        uses: actions/download-artifact@v8
+        with:
+          name: github-pages
+
+      - name: Extract site
+        run: tar -xf artifact.tar
+
+      - name: Check base path
+        run: |
+          grep -F '<base href="/fixture/" />' index.html
+          grep -F 'const base = "/fixture/";' service-worker.js
+
+  # A dry run against an earlier pull request in this repository, which has no AI agent authorship.
+  check-agent-authorship:
+    name: check-agent-authorship
+    uses: ./.github/workflows/check-agent-authorship.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      pull-request: 41
+      dry-run: true
+
+  check-agent-authorship-result:
+    name: check-agent-authorship (check result)
+    needs: check-agent-authorship
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check result
+        run: test "${{ needs.check-agent-authorship.outputs.result }}" = none
+
+  # Publishes to a folder feed in the workspace instead of real feeds, and skips the release and Discord message.
+  publish-nuget-immutable:
+    name: publish-nuget-immutable
+    uses: ./.github/workflows/publish-nuget-immutable.yml
+    permissions:
+      contents: write
+      packages: write
+    with:
+      dotnet-version: 10.0.x
+      project-path: tests/fixtures/nuget/src/*/*.csproj
+      test-path: tests/fixtures/nuget/tests/*/*.csproj
+      package-prefix: Fixture.
+      push-to-nuget: false
+      push-to-github: false
+      push-to-custom-feeds: true
+      custom-feed-urls: tests/fixtures/nuget/feed
+      create-release: false
+    secrets:
+      CUSTOM_FEED_API_KEYS: local-feed
+
+  publish-nuget-immutable-packages:
+    name: publish-nuget-immutable (check packages)
+    needs: publish-nuget-immutable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check newly uploaded output
+        run: test "${{ needs.publish-nuget-immutable.outputs.has-new }}" = true
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: nuget-packages
+
+      - name: Check packages
+        run: |
+          test -f Fixture.Core.1.0.0.nupkg
+          test -f Fixture.Core.1.0.0.snupkg
+          test -f Fixture.Extra.1.1.0-beta.1.nupkg
+
+  # The required status check for pull requests into main. It passes only when every test above passed.
+  validate:
+    name: validate
+    if: ${{ always() }}
+    needs:
+      - lint
+      - tools
+      - dotnet-ci
+      - blazor-wasm-github-pages-site
+      - check-agent-authorship-result
+      - publish-nuget-immutable-packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check test results
+        run: test "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = false

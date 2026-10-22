@@ -1,0 +1,7 @@
+<Project Sdk="MSTest.Sdk/4.5.1">
+
+  <ItemGroup>
+    <ProjectReference Include="../Workflows.Tools/Workflows.Tools.csproj" />
+  </ItemGroup>
+
+</Project>

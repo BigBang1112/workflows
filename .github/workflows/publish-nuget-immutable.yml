@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       package-prefix:
-        description: Prefix filter for NuGet package selection (e.g. "MyCompany.")
+        description: Only publish packages whose ID starts with this prefix (e.g. MyCompany.)
         type: string
         default: ""
       project-path:
@@ -12,7 +12,7 @@ on:
         type: string
         default: ""
       test-path:
-        description: Newline-separated test-project paths or globs. Defaults to dotnet test discovery in the repository root.
+        description: Newline-separated test project paths or globs. Defaults to the solution or project in the repository root.
         type: string
         default: ""
       pack-path:
@@ -20,11 +20,11 @@ on:
         type: string
         default: ""
       dotnet-version:
-        description: .NET version to use
+        description: .NET SDK versions to install, one per line (e.g. 10.0.x). Install every version the test projects target, so their runtimes are available. When empty, the SDK from global.json in the repository root is used, or the runner's preinstalled SDK if there is none.
         type: string
-        default: latest
+        default: ""
       workloads:
-        description: Additional workloads to install (e.g. wasm-tools)
+        description: Comma-separated .NET workloads to install (e.g. wasm-tools)
         type: string
         default: ""
       enable-tests:
@@ -32,13 +32,9 @@ on:
         type: boolean
         default: true
       enable-coverage:
-        description: Generate and publish code coverage summary
+        description: Collect Cobertura code coverage into $RUNNER_TEMP/coverage when tests run
         type: boolean
         default: true
-      use-microsoft-testing-platform:
-        description: Use Microsoft Testing Platform coverage arguments (requires MTP selected in global.json)
-        type: boolean
-        default: false
       push-to-nuget:
         description: Publish packages to NuGet.org
         type: boolean
@@ -52,46 +48,58 @@ on:
         type: boolean
         default: false
       custom-feed-urls:
-        description: Newline-separated list of custom NuGet feed source URLs to push packages to
+        description: Newline-separated list of custom NuGet feed source URLs
         type: string
         default: ""
       upload-to-release:
-        description: Upload packages to the GitHub Release
+        description: Attach the newly uploaded .nupkg and .snupkg files to the GitHub release
         type: boolean
         default: true
       main-project:
-        description: Package name of the main project, used for the release tag/version and the unheaded first release-notes section. When empty, the highest newly pushed version determines the tag and every package's release notes have a header.
+        description: Package ID or project directory name of the main package, used for the release version and the unheaded first release notes section. When empty, the highest version determines the release version and every section has a heading.
         type: string
         default: ""
       create-release:
-        description: Create a GitHub Release (with tag) from the newly pushed packages
+        description: Create one GitHub release for the packages newly uploaded in this run
         type: boolean
         default: true
+      release-description:
+        description: Text placed before the release notes in the GitHub release
+        type: string
+        default: ""
       send-discord-message:
-        description: Send the release notes to Discord
+        description: Post the release notes to Discord after the release is created
         type: boolean
         default: false
       discord-top-lines:
-        description: Newline-separated lines inserted below the heading, before the release notes, in the Discord message. Ignored if the Discord webhook secret isn't set.
+        description: Newline-separated lines inserted below the heading, before the release notes, in the Discord message
         type: string
         default: ""
       discord-bottom-lines:
-        description: Newline-separated lines appended at the very end of the Discord message. Ignored if the Discord webhook secret isn't set.
+        description: Newline-separated lines appended at the very end of the Discord message
         type: string
         default: ""
       release-title-prefix:
-        description: Optional text prepended to the GitHub Release title, separated from the version by one space. Defaults to empty, which results in the release title being the version only.
+        description: Text before the version in the GitHub release title, separated by one space
         type: string
         default: ""
     secrets:
       NUGET_API_KEY:
+        description: NuGet.org API key
         required: false
       CUSTOM_FEED_API_KEYS:
-        description: Newline-separated list of API keys matching the order of custom-feed-urls
+        description: Newline-separated API keys in the same order as custom-feed-urls
         required: false
       DISCORD_WEBHOOK_URL:
-        description: Discord webhook URL. When set, the constructed release notes are posted to it, split to respect Discord's per-message character limit.
+        description: Discord webhook URL for the release announcement
         required: false
+    outputs:
+      has-new:
+        description: true when at least one package was uploaded for the first time
+        value: ${{ jobs.publish.outputs.has-new }}
+      release-url:
+        description: URL of the created GitHub release
+        value: ${{ jobs.publish.outputs.release-url }}
 
 permissions:
   contents: write
@@ -101,135 +109,87 @@ concurrency:
   group: publish-nuget-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
 jobs:
-  deploy:
+  publish:
     name: Build, test, and publish NuGet packages
     runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v6
+    outputs:
+      has-new: ${{ steps.publish.outputs.has-new }}
+      release-url: ${{ steps.release.outputs.url }}
 
-      # A reusable workflow's normal checkout is the caller repository. Fetch the
-      # helper from the exact commit that supplied this workflow so callers do not
-      # need to copy it into their own repositories.
-      - name: Checkout publish helper
-        uses: actions/checkout@v6
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # A reusable workflow only checks out the caller's repository. The tools come from the
+      # exact commit of this workflow, so callers don't need copies of them.
+      - name: Checkout workflow tools
+        if: ${{ !env.ACT }}
+        uses: actions/checkout@v7
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
-          path: _publish-nuget-immutable-helper
-          sparse-checkout: .github/scripts
+          path: .workflow-tools
+          sparse-checkout: tools
+
+      # act (local testing) doesn't provide the job.workflow_* context. It only runs this
+      # repository's own tests, where the tools are already in the workspace.
+      - name: Copy workflow tools
+        if: ${{ env.ACT }}
+        run: mkdir .workflow-tools && cp -r tools .workflow-tools/
+
+      # Outside the workspace, the caller's global.json and MSBuild files don't affect the tools,
+      # and the tools' projects don't match the caller's project globs.
+      - name: Move workflow tools out of the workspace
+        run: mv .workflow-tools "$RUNNER_TEMP/workflow-tools"
+
+      - name: Setup .NET for workflow tools
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
+          workloads: ${{ inputs.workloads }}
 
-      - name: Install .NET workloads
-        if: inputs.workloads != ''
-        shell: bash
-        env:
-          WORKLOADS: ${{ inputs.workloads }}
+      - name: Build workflow tools
+        working-directory: ${{ runner.temp }}/workflow-tools
         run: |
-          workloads="${WORKLOADS//,/ }"
-          dotnet workload install $workloads
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-
-      - name: Test publish helper
-        run: python _publish-nuget-immutable-helper/.github/scripts/test_publish_nuget_immutable.py
+          dotnet build tools/Workflows.Tools -c Release -o bin
+          echo "WORKFLOW_TOOLS=$PWD/bin/Workflows.Tools.dll" >> "$GITHUB_ENV"
 
       - name: Build
-        shell: bash
         env:
           PROJECT_PATH: ${{ inputs.project-path }}
-        run: |
-          set -euo pipefail
-          if [[ -z "$PROJECT_PATH" ]]; then
-            dotnet build -c Release -p:ContinuousIntegrationBuild=true
-            exit 0
-          fi
-          while IFS= read -r pattern || [[ -n "$pattern" ]]; do
-            [[ -z "$pattern" ]] && continue
-            mapfile -t projects < <(compgen -G "$pattern" || true)
-            ((${#projects[@]})) || { echo "No projects match: $pattern" >&2; exit 1; }
-            for project in "${projects[@]}"; do
-              dotnet build "$project" -c Release -p:ContinuousIntegrationBuild=true
-            done
-          done <<< "$PROJECT_PATH"
+        run: dotnet "$WORKFLOW_TOOLS" nuget build
 
       - name: Test
         if: inputs.enable-tests
-        shell: bash
         env:
           TEST_PATH: ${{ inputs.test-path }}
-        run: |
-          set -euo pipefail
-          test_args=()
-          if [[ "${{ inputs.enable-coverage }}" == "true" ]]; then
-            if [[ "${{ inputs.use-microsoft-testing-platform }}" == "true" ]]; then
-              test_args=(--coverage --coverage-output-format cobertura --results-directory ./coverage)
-            else
-              test_args=(--collect:"XPlat Code Coverage" --results-directory ./coverage)
-            fi
-          fi
-          if [[ -z "$TEST_PATH" ]]; then
-            dotnet test -c Release "${test_args[@]}"
-            exit 0
-          fi
-          while IFS= read -r pattern || [[ -n "$pattern" ]]; do
-            [[ -z "$pattern" ]] && continue
-            mapfile -t projects < <(compgen -G "$pattern" || true)
-            ((${#projects[@]})) || { echo "No test projects match: $pattern" >&2; exit 1; }
-            for project in "${projects[@]}"; do
-              dotnet test "$project" -c Release "${test_args[@]}"
-            done
-          done <<< "$TEST_PATH"
+          ENABLE_COVERAGE: ${{ inputs.enable-coverage }}
+        run: dotnet "$WORKFLOW_TOOLS" nuget test
 
-      - name: Generate code coverage summary
-        if: inputs.enable-tests && inputs.enable-coverage
-        run: |
-          dotnet tool install --global dotnet-reportgenerator-globaltool
-          reportgenerator -reports:"./coverage/**/coverage.cobertura.xml" -targetdir:"./coveragereport" -reporttypes:"MarkdownSummaryGithub"
-          cat ./coveragereport/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Pack packages
-        shell: bash
+      - name: Pack
+        id: pack
         env:
           PACK_PATH: ${{ inputs.pack-path }}
           PROJECT_PATH: ${{ inputs.project-path }}
           PACKAGE_PREFIX: ${{ inputs.package-prefix }}
-        run: |
-          set -euo pipefail
-          mkdir -p packages
-          pack_path="${PACK_PATH:-$PROJECT_PATH}"
-          if [[ -z "$pack_path" ]]; then
-            dotnet pack -c Release -p:ContinuousIntegrationBuild=true --output ./packages
-          else
-            while IFS= read -r pattern || [[ -n "$pattern" ]]; do
-              [[ -z "$pattern" ]] && continue
-              mapfile -t projects < <(compgen -G "$pattern" || true)
-              ((${#projects[@]})) || { echo "No projects to pack match: $pattern" >&2; exit 1; }
-              for project in "${projects[@]}"; do
-                dotnet pack "$project" -c Release -p:ContinuousIntegrationBuild=true --output ./packages
-              done
-            done <<< "$pack_path"
-          fi
-          python _publish-nuget-immutable-helper/.github/scripts/publish_nuget_immutable.py prepare
+        run: dotnet "$WORKFLOW_TOOLS" nuget pack
 
-      - name: Upload package artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: nuget-packages
-          path: |
-            packages/${{ inputs.package-prefix }}*.nupkg
-            packages/${{ inputs.package-prefix }}*.snupkg
-          if-no-files-found: error
-
-      - name: Publish packages
+      - name: Publish
         id: publish
         env:
           PUSH_TO_NUGET: ${{ inputs.push-to-nuget }}
@@ -238,21 +198,32 @@ jobs:
           CUSTOM_FEED_URLS: ${{ inputs.custom-feed-urls }}
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
           GITHUB_PACKAGES_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           CUSTOM_FEED_API_KEYS: ${{ secrets.CUSTOM_FEED_API_KEYS }}
-        run: python _publish-nuget-immutable-helper/.github/scripts/publish_nuget_immutable.py publish
+        run: dotnet "$WORKFLOW_TOOLS" nuget publish
 
-      - name: Create release from newly uploaded packages
-        if: steps.publish.outputs.has-new == 'true' && inputs.create-release
+      # Also runs when publishing failed, so the packed packages are always kept.
+      - name: Upload packages
+        if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget-packages
+          path: |
+            ${{ runner.temp }}/nuget-packages/${{ inputs.package-prefix }}*.nupkg
+            ${{ runner.temp }}/nuget-packages/${{ inputs.package-prefix }}*.snupkg
+          if-no-files-found: error
+
+      - name: Create release
         id: release
+        if: steps.publish.outputs.has-new == 'true' && inputs.create-release
         env:
           GH_TOKEN: ${{ github.token }}
           MAIN_PROJECT: ${{ inputs.main-project }}
           UPLOAD_TO_RELEASE: ${{ inputs.upload-to-release }}
           RELEASE_TITLE_PREFIX: ${{ inputs.release-title-prefix }}
-        run: python _publish-nuget-immutable-helper/.github/scripts/publish_nuget_immutable.py release
+          RELEASE_DESCRIPTION: ${{ inputs.release-description }}
+        run: dotnet "$WORKFLOW_TOOLS" nuget release
 
-      - name: Send message to Discord
+      - name: Send Discord message
         if: steps.release.outputs.created == 'true' && inputs.send-discord-message
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -260,10 +231,11 @@ jobs:
           MAIN_PROJECT: ${{ inputs.main-project }}
           DISCORD_TOP_LINES: ${{ inputs.discord-top-lines }}
           DISCORD_BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}
-        run: python _publish-nuget-immutable-helper/.github/scripts/publish_nuget_immutable.py discord
+        run: dotnet "$WORKFLOW_TOOLS" nuget discord
 
+      # Comes last, so packages that did upload still get their release.
       - name: Report feed failures
         if: steps.publish.outputs.has-failures == 'true'
         run: |
-          echo 'One or more package feeds rejected an upload; see the publish summary.' >&2
+          echo "::error::One or more package feeds rejected an upload. See the job summary."
           exit 1
