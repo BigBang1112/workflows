@@ -23,6 +23,10 @@ on:
         description: Build configuration
         type: string
         default: Release
+      restore-args:
+        description: Extra arguments for dotnet restore
+        type: string
+        default: ""
       build-args:
         description: Extra arguments for dotnet build
         type: string
@@ -86,7 +90,7 @@ jobs:
             ${{ runner.os }}-nuget-
 
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore ${{ inputs.restore-args }}
 
       - name: Build
         run: dotnet build -c ${{ inputs.configuration }} --no-restore -p:ContinuousIntegrationBuild=true ${{ inputs.build-args }}
