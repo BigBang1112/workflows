@@ -1,0 +1,110 @@
+name: .NET CI
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: .NET SDK version to install (e.g. 10.0.x). When empty, the SDK from global.json in the repository root is used, or the runner's preinstalled SDK if there is none.
+        type: string
+        default: ""
+      workloads:
+        description: Comma-separated .NET workloads to install (e.g. wasm-tools)
+        type: string
+        default: ""
+      os:
+        description: JSON array of runners to build on
+        type: string
+        default: '["ubuntu-latest", "windows-latest"]'
+      working-directory:
+        description: Directory with the solution or project to build, relative to the repository root
+        type: string
+        default: .
+      configuration:
+        description: Build configuration
+        type: string
+        default: Release
+      build-args:
+        description: Extra arguments for dotnet build
+        type: string
+        default: ""
+      test-args:
+        description: Extra arguments for dotnet test
+        type: string
+        default: ""
+      enable-tests:
+        description: Run dotnet test
+        type: boolean
+        default: true
+      enable-coverage:
+        description: Collect Cobertura code coverage into $RUNNER_TEMP/coverage
+        type: boolean
+        default: true
+      enable-cache:
+        description: Cache NuGet packages
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJson(inputs.os) }}
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+          workloads: ${{ inputs.workloads }}
+
+      - name: Cache NuGet packages
+        if: inputs.enable-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles(format('{0}/**/*.csproj', inputs.working-directory), format('{0}/**/*.props', inputs.working-directory), format('{0}/**/*.targets', inputs.working-directory)) }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c ${{ inputs.configuration }} --no-restore -p:ContinuousIntegrationBuild=true ${{ inputs.build-args }}
+
+      # dotnet test uses MTP when global.json selects it as the test runner, and VSTest otherwise.
+      - name: Detect test platform
+        id: test-platform
+        if: inputs.enable-tests
+        run: |
+          if grep -qsF Microsoft.Testing.Platform global.json "$GITHUB_WORKSPACE/global.json"; then echo "mtp=true" >> "$GITHUB_OUTPUT"; fi
+
+      # Both platforms use Microsoft code coverage, so the Cobertura reports are the same.
+      # VSTest gets it from Microsoft.NET.Test.Sdk, but measures the test assembly unless told not to.
+      - name: Test
+        if: inputs.enable-tests
+        run: >
+          dotnet test -c ${{ inputs.configuration }} --no-build
+          ${{ inputs.enable-coverage && steps.test-platform.outputs.mtp && '--coverage --coverage-output-format cobertura' || '' }}
+          ${{ inputs.enable-coverage && !steps.test-platform.outputs.mtp && '--collect "Code Coverage;Format=cobertura;IncludeTestAssembly=false"' || '' }}
+          ${{ inputs.enable-coverage && format('--results-directory "{0}/coverage"', runner.temp) || '' }}
+          ${{ inputs.test-args }}

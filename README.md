@@ -1,230 +1,329 @@
 # Workflows
 
-[![GitHub last commit (branch)](https://img.shields.io/github/last-commit/bigbang1112/workflows/main?style=for-the-badge&logo=github)](https://github.com/BigBang1112/workflows)
-
-A collection of reusable GitHub Actions workflows for .NET development. Reference them from any repository using `workflow_call`.
+Reusable GitHub Actions workflows for .NET projects. Call them from any repository with `workflow_call`.
 
 ## Usage
 
 ```yaml
 jobs:
   ci:
-    uses: bigbang1112/workflows/.github/workflows/ci.yml@main
+    uses: bigbang1112/workflows/.github/workflows/dotnet-ci.yml@main
     with:
-      dotnet-version: 10.x.x
+      dotnet-version: 10.0.x
 ```
 
-Secrets are forwarded explicitly:
+Pin `@main` to a tag or commit SHA if you want the workflow to stay the same until you update it.
+
+## Workflows
+
+### `dotnet-ci.yml`
+
+Restores, builds, and tests a .NET solution or project on one or more runners, and collects Cobertura code coverage with both VSTest and Microsoft Testing Platform (MTP).
+
+| Input | Description | Default |
+|---|---|---|
+| `dotnet-version` | .NET SDK version to install. When empty, the SDK from `global.json` in the repository root is used, or the runner's preinstalled SDK if there is none. | `""` |
+| `workloads` | Comma-separated workloads to install (e.g. `wasm-tools`) | `""` |
+| `os` | JSON array of runners | `["ubuntu-latest", "windows-latest"]` |
+| `working-directory` | Directory with the solution or project, relative to the repository root | `.` |
+| `configuration` | Build configuration | `Release` |
+| `build-args` | Extra `dotnet build` arguments | `""` |
+| `test-args` | Extra `dotnet test` arguments | `""` |
+| `enable-tests` | Run `dotnet test` | `true` |
+| `enable-coverage` | Collect Cobertura coverage into `$RUNNER_TEMP/coverage` | `true` |
+| `enable-cache` | Cache NuGet packages | `true` |
+
+### Coverage
+
+Both test platforms use Microsoft code coverage, so the reports have the same format and content. Test assemblies are excluded, and only the code under test is measured.
+
+| Platform | Package needed | Report location |
+|---|---|---|
+| VSTest | None, `Microsoft.NET.Test.Sdk` already includes it | `$RUNNER_TEMP/coverage/[guid]/[name].cobertura.xml` |
+| MTP | `Microsoft.Testing.Extensions.CodeCoverage` (MSTest.Sdk includes it by default) | `$RUNNER_TEMP/coverage/[guid].cobertura.xml` |
+
+Use `**/*.cobertura.xml` to find the reports from either platform. With MTP, **`dotnet test` fails if the coverage package is missing**, because it doesn't recognize `--coverage`. Set `enable-coverage: false` for projects without it.
+
+### Test platform detection
+
+The workflow detects the test platform the same way `dotnet test` does, from the test runner in `global.json`:
+
+```json
+{
+  "test": {
+    "runner": "Microsoft.Testing.Platform"
+  }
+}
+```
+
+It looks for `global.json` in `working-directory` and in the repository root. A `global.json` in a directory between them isn't detected, so put it in one of those two places.
+
+### `blazor-wasm-github-pages.yml`
+
+Publishes a Blazor WebAssembly app and deploys it to GitHub Pages. Before publishing, it sets the base path in `wwwroot/index.html` and, for PWAs, in `wwwroot/service-worker.published.js`, so the app works when it isn't served from the domain root.
 
 ```yaml
+jobs:
+  pages:
+    uses: bigbang1112/workflows/.github/workflows/blazor-wasm-github-pages.yml@main
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    with:
+      project: src/MyApp
+```
+
+In the repository settings, set **Pages > Build and deployment > Source** to **GitHub Actions**.
+
+| Input | Description | Default |
+|---|---|---|
+| `project` | *(required)* Path to the Blazor WebAssembly project directory (e.g. `src/MyApp`) | |
+| `dotnet-version` | .NET SDK version to install. When empty, the SDK from `global.json` in the repository root is used, or the runner's preinstalled SDK if there is none. | `""` |
+| `workloads` | Comma-separated workloads to install | `wasm-tools` |
+| `base-path` | Path the site is served from, with a trailing slash (e.g. `/my-repo/`). When empty, it is read from the repository's Pages settings. | `""` |
+| `enable-cache` | Cache NuGet packages | `true` |
+| `deploy` | Deploy the site. When `false`, the site is only built and uploaded as the `github-pages` artifact. | `true` |
+
+| Output | Description |
+|---|---|
+| `page-url` | URL of the deployed site |
+
+The default base path comes from the Pages settings, so it is `/my-repo/` for a project site and `/` for a custom domain or a `username.github.io` repository. **The build fails if `index.html` or the service worker doesn't contain the default base** (`<base href="/" />` and `const base = "/";`), so a changed template can't deploy a broken site.
+
+Deployments run one at a time per repository. A new deployment waits for the running one to finish instead of cancelling it.
+
+### `publish-nuget-immutable.yml`
+
+Builds, tests, packs, and publishes .NET packages to NuGet.org, GitHub Packages, and custom feeds. It then creates one GitHub release for the packages that were uploaded for the first time, which works with [immutable releases](https://docs.github.com/repositories/releasing-projects-on-github/about-releases), and can announce it on Discord.
+
+```yaml
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    uses: bigbang1112/workflows/.github/workflows/publish-nuget-immutable.yml@main
+    permissions:
+      contents: write
+      packages: write
+    with:
+      package-prefix: MyCompany.
+      main-project: MyCompany.Core
     secrets:
       NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
 ```
 
-## Workflows
-
-### `ci.yml` — CI Build & Test
-
-Builds and tests a .NET solution across one or more OS runners with optional code coverage.
-
 | Input | Description | Default |
 |---|---|---|
-| `dotnet-version` | .NET version | `latest` |
-| `workloads` | Comma-separated workloads to install | |
-| `os` | JSON array of runners | `["ubuntu-latest", "windows-latest"]` |
-| `build-args` | Extra `dotnet build` arguments | |
-| `test-args` | Extra `dotnet test` arguments | |
-| `use-microsoft-testing-platform` | Use MTP coverage arguments; requires MTP selected in `global.json` | `false` |
-| `enable-coverage` | Generate and publish coverage summary | `true` |
-| `enable-cache` | Cache NuGet packages | `true` |
-
-### `deploy-pages.yml` — Deploy Blazor WASM to GitHub Pages
-
-Publishes a Blazor WebAssembly project and deploys it to GitHub Pages. By default, patches `<base href>` and `service-worker.published.js` to the repository name.
-
-Requires `pages: write` and `id-token: write` permissions on the caller.
-
-| Input | Description | Default |
-|---|---|---|
-| `project` | *(required)* Path to the Blazor WASM project | |
-| `dotnet-version` | .NET version | `latest` |
-| `workloads` | Comma-separated workloads to install | `wasm-tools` |
-| `enable-cache` | Cache NuGet packages | `true` |
-| `enable-coverage` | Generate HTML report at `/coverage/` on the site | `false` |
-| `use-microsoft-testing-platform` | Use MTP coverage arguments; requires MTP selected in `global.json` | `false` |
-| `patch-base` | Patch `<base href>` in `index.html` and `service-worker.published.js` to the repository name | `true` |
-
-### `docker-publish.yml` — Publish Docker Images
-
-Builds and pushes Docker images to Docker Hub and/or GitHub Container Registry using a matrix of projects.
-
-| Input | Description | Default |
-|---|---|---|
-| `matrix` | *(required)* JSON array of `{project, image_name}` objects | |
-| `platforms` | Target platforms for Docker build | `linux/amd64,linux/arm64` |
-| `push-to-dockerhub` | Push images to Docker Hub | `true` |
-| `push-to-ghcr` | Push images to GitHub Container Registry | `true` |
-| `dockerhub-username` | Docker Hub username (defaults to GitHub repository owner if not provided) | `""` |
-
-| Secret | Description |
-|---|---|
-| `DOCKERHUB_TOKEN` | Docker Hub access token |
-
-### `publish-nuget.yml` — Publish NuGet Packages
-
-Builds, tests, packs, and publishes NuGet packages to nuget.org and/or GitHub Packages.
-
-During packing, each project's `PackageReleaseNotes` is set from its `[project-folder]/Changelogs/v[Version].md` file, if present, where `Version` is the project's `Version` property, or `VersionPrefix` combined with `VersionSuffix` (e.g. `1.2.3-beta.1`) if set.
-
-| Input | Description | Default |
-|---|---|---|
-| `package-prefix` | Filter packages by prefix (e.g. `MyCompany.`) | |
-| `project-path` | Path(s) to build and pack. Supports wildcards. | |
-| `test-path` | Path(s) to test projects. Supports wildcards. | |
-| `pack-path` | Path(s) to pack. Supports wildcards. Defaults to `project-path`. | |
-| `dotnet-version` | .NET version | `latest` |
-| `workloads` | Comma-separated workloads to install | |
+| `package-prefix` | Only publish packages whose ID starts with this prefix (e.g. `MyCompany.`) | `""` |
+| `project-path` | Newline-separated project paths or globs to build | `""` (repository root) |
+| `test-path` | Newline-separated test project paths or globs | `""` (repository root) |
+| `pack-path` | Newline-separated project paths or globs to pack | `""` (`project-path`, then repository root) |
+| `dotnet-version` | .NET SDK versions to install, one per line. Install every version the test projects target. When empty, the SDK from `global.json` in the repository root is used, or the runner's preinstalled SDK if there is none. | `""` |
+| `workloads` | Comma-separated workloads to install | `""` |
 | `enable-tests` | Run tests | `true` |
-| `enable-coverage` | Generate and publish coverage summary | `true` |
-| `use-microsoft-testing-platform` | Use MTP coverage arguments; requires MTP selected in `global.json` | `false` |
+| `enable-coverage` | Collect Cobertura coverage into `$RUNNER_TEMP/coverage` when tests run | `true` |
 | `push-to-nuget` | Publish to NuGet.org | `true` |
 | `push-to-github` | Publish to GitHub Packages | `true` |
-| `push-to-custom-feeds` | Publish to custom NuGet feeds (requires `custom-feed-urls` and `CUSTOM_FEED_API_KEYS`) | `false` |
-| `custom-feed-urls` | Newline-separated list of custom NuGet feed source URLs | |
-| `upload-to-release` | Upload `.nupkg` files to the GitHub Release | `true` |
-| `nuget-username` | NuGet.org username for [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC), used to obtain a short-lived API key when `NUGET_API_KEY` is not provided | |
-| `discord-top-lines` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message | |
-| `discord-bottom-lines` | Newline-separated lines appended at the very end of the Discord message | |
+| `push-to-custom-feeds` | Publish to `custom-feed-urls` (requires `CUSTOM_FEED_API_KEYS`) | `false` |
+| `custom-feed-urls` | Newline-separated feed URLs. A relative folder path is resolved from the repository root. | `""` |
+| `upload-to-release` | Attach the newly uploaded `.nupkg` and `.snupkg` files to the release | `true` |
+| `main-project` | Package ID or project directory name of the main package (see [Release notes](#release-notes)) | `""` |
+| `create-release` | Create a GitHub release for the newly uploaded packages | `true` |
+| `release-description` | Text placed before the release notes in the release | `""` |
+| `send-discord-message` | Post the release notes to Discord after the release is created | `false` |
+| `discord-top-lines` | Newline-separated lines inserted below the heading, before the release notes, in the Discord message | `""` |
+| `discord-bottom-lines` | Newline-separated lines appended at the very end of the Discord message | `""` |
+| `release-title-prefix` | Text before the version in the release title, separated by one space | `""` |
 
 | Secret | Description |
 |---|---|
-| `NUGET_API_KEY` | nuget.org API key. Optional if `nuget-username` is set to use Trusted Publishing (OIDC) instead |
-| `CUSTOM_FEED_API_KEYS` | Newline-separated API keys matching the order of `custom-feed-urls` |
-| `DISCORD_WEBHOOK_URL` | Discord webhook URL. When set and at least one package was newly pushed, the release's notes are posted to it (heading + optional top lines + release body + GitHub/NuGet links + optional bottom lines), split to respect Discord's per-message character limit without breaking mid-line |
+| `NUGET_API_KEY` | NuGet.org API key |
+| `CUSTOM_FEED_API_KEYS` | Newline-separated API keys in the same order as `custom-feed-urls` |
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL for the release announcement |
 
-Requires `id-token: write` permission on the caller when using Trusted Publishing (`nuget-username`).
-
-### `publish-nuget-immutable.yml` — Publish NuGet Packages (Immutable Release)
-
-Builds, tests, packs, and publishes one or more .NET packages to NuGet.org, GitHub Packages, and/or custom feeds. Its helper validates each packed `.nupkg`'s actual ID and version against the matching project, then uses the project's `<PackageReleaseNotes>` MSBuild XML property for release notes. The job summary shows the result for every selected feed and symbols upload. When called from another repository, the workflow checks out its bundled Python helper at the same commit as the reusable workflow, so callers do not need to copy helper files.
-
-Whenever at least one package is uploaded for the first time, the workflow creates one GitHub Release for those newly uploaded packages—a pattern compatible with immutable releases. It attaches their `.nupkg` and `.snupkg` assets unless `upload-to-release` is disabled. When `main-project` is set, that package's release notes are first and unheaded; the other packages follow under a `## [Package ID] [Version]` heading. When it is empty, the highest newly uploaded version determines the release tag and every package's release notes have a `## [Package ID] [Version]` heading. The release tag uses the caller's tag ref when available, otherwise `v[main package version]`.
-
-Release notes come directly from each project's `<PackageReleaseNotes>` MSBuild XML property. If `DISCORD_WEBHOOK_URL` is set, a release announcement using the same notes is sent after the release is created. It is split on line boundaries using Discord's UTF-16 character limit and retries rate-limited requests. The workflow runs the helper's unit tests before building; they are also available at `.github/scripts/test_publish_nuget_immutable.py`.
-
-| Input | Description | Default |
-|---|---|---|
-| `package-prefix` | Filter packages by prefix (e.g. `MyCompany.`) | |
-| `project-path` | Newline-separated project glob(s) to build. | |
-| `test-path` | Newline-separated test-project glob(s). | |
-| `pack-path` | Newline-separated project glob(s) to pack. Defaults to `project-path`, then the repository root. | |
-| `dotnet-version` | .NET version | `latest` |
-| `workloads` | Comma-separated workloads to install | |
-| `enable-tests` | Run tests | `true` |
-| `enable-coverage` | Generate and publish coverage summary when tests run | `true` |
-| `use-microsoft-testing-platform` | Use MTP coverage arguments; requires MTP selected in `global.json` | `false` |
-| `push-to-nuget` | Publish to NuGet.org | `true` |
-| `push-to-github` | Publish to GitHub Packages | `true` |
-| `push-to-custom-feeds` | Publish to custom NuGet feeds (requires `custom-feed-urls` and `CUSTOM_FEED_API_KEYS`) | `false` |
-| `custom-feed-urls` | Newline-separated list of custom NuGet feed source URLs | |
-| `upload-to-release` | Attach newly uploaded `.nupkg` and `.snupkg` files to the GitHub Release | `true` |
-| `main-project` | Package ID used for the release version and unheaded first release-notes section; when empty, the highest version determines the release version and all sections have headers | |
-| `create-release` | Create one immutable GitHub Release for packages newly uploaded during this run | `true` |
-| `discord-top-lines` | Newline-separated lines inserted below the heading, before the release notes, in the Discord message | |
-| `discord-bottom-lines` | Newline-separated lines appended at the very end of the Discord message | |
-| `release-title-prefix` | Optional text before the GitHub Release title version; one space is inserted between them. | `""` |
-
-| Secret | Description |
+| Output | Description |
 |---|---|
-| `NUGET_API_KEY` | NuGet.org API key. |
-| `CUSTOM_FEED_API_KEYS` | Newline-separated API keys matching the order of `custom-feed-urls` |
-| `DISCORD_WEBHOOK_URL` | Discord webhook URL. When set, the release notes are posted after the release is created, split on line boundaries to respect Discord's per-message character limit |
+| `has-new` | `true` when at least one package was uploaded for the first time |
+| `release-url` | URL of the created GitHub release |
 
-### `publish-artifact.yml` — Publish Artifacts
+#### Several packages
 
-Publishes a .NET project for multiple runtimes, zips each output separately, computes a SHA256 checksum per zip (written to the job summary), and uploads all zips to the GitHub Release.
+A repository with libraries in `Src`, tests in `Tests`, and a template package next to them can publish everything in one release. The test projects target several frameworks, so every SDK they need is installed. A `workflow_dispatch` description goes to both the release and the Discord message:
+
+```yaml
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      description:
+        description: Text before the release notes
+        type: string
+        default: ""
+
+jobs:
+  publish:
+    uses: bigbang1112/workflows/.github/workflows/publish-nuget-immutable.yml@main
+    permissions:
+      contents: write
+      packages: write
+    with:
+      dotnet-version: |
+        10.0.x
+        9.0.x
+        8.0.x
+      project-path: Src/*/*.csproj
+      test-path: Tests/*/*.csproj
+      pack-path: |
+        Src/*/*.csproj
+        Templates/MyLibrary.Templates.csproj
+      main-project: MyLibrary
+      release-title-prefix: MyLibrary
+      release-description: ${{ inputs.description }}
+      push-to-custom-feeds: true
+      custom-feed-urls: https://nuget.example.com/v3/index.json
+      send-discord-message: true
+      discord-top-lines: ${{ inputs.description }}
+    secrets:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      CUSTOM_FEED_API_KEYS: ${{ secrets.MY_FEED_API_KEY }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+```
+
+#### Publishing
+
+Every package is pushed to each selected feed, and its `.snupkg` symbols go to NuGet.org. The job summary has a table with the result for each feed:
+
+- `uploaded`: the feed confirmed a new upload.
+- `duplicate`: the feed already has this version.
+- `failed`: the push failed, or the feed's API key is missing.
+- `unconfirmed`: the push succeeded, but the output doesn't confirm a new upload.
+
+**Only `uploaded` makes a package part of the release.** Rerunning the workflow after a partial failure releases only what is new, and a symbols-only upload doesn't count. When any feed reports `failed` or `unconfirmed`, the job still creates the release for the uploaded packages and then fails.
+
+The packed packages are also kept as the `nuget-packages` artifact.
+
+#### Release notes
+
+Each package's notes come from the `PackageReleaseNotes` property of the project that produced it. The workflow matches packages to projects by the package's actual ID and version (`PackageVersion`, which `VersionPrefix` and `VersionSuffix` set by default), and removes the indentation from notes written over several lines:
+
+```xml
+<PackageReleaseNotes>
+  - Added `Calculator.Add`
+    - Works with negative numbers
+</PackageReleaseNotes>
+```
+
+`release-description` comes first. With `main-project`, that package's notes follow without a heading, and its version names the release. Every other package gets a `### [ID] [Version]` heading. Without it, every package has a heading and the highest version names the release.
+
+The release tag is the pushed tag when the workflow runs for one (and the release then requires that tag to exist). Otherwise, it is `v` followed by the main package's version.
+
+#### Discord
+
+The message starts with a `## [ID] [Version]` heading for the main package, followed by `discord-top-lines` and its notes. The other packages follow, then links to the release and, when the main package is on NuGet.org, to its NuGet page. Long messages are split at line breaks into several messages, and rate-limited requests are retried.
+
+### `check-agent-authorship.yml`
+
+Checks a pull request for commits authored or co-authored by AI agents:
+
+- **Co-authored:** some commits name an agent as their author or in a `Co-authored-by` trailer. The workflow comments with a table of those commits and the steps to rewrite them, and the check fails until they're fixed.
+- **Agent only:** an agent opened the pull request, or authored every commit. The workflow comments and closes the pull request.
+- **None:** the check passes. A comment from an earlier run is updated to say the problem is resolved.
+
+The workflow keeps a single comment per pull request and edits it on every run, so pushing fixes doesn't add more comments.
+
+```yaml
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  agents:
+    uses: bigbang1112/workflows/.github/workflows/check-agent-authorship.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+```
+
+`pull_request_target` lets the workflow comment on and close pull requests from forks. It is safe here, because the workflow only reads commit metadata through the API and never checks out or runs the pull request's code. With `pull_request`, it only works for branches in the same repository.
 
 | Input | Description | Default |
 |---|---|---|
-| `project` | *(required)* Path to the project to publish (e.g. src/MyApp) | |
-| `artifact-name` | *(required)* Base name for the generated zip files (e.g. MyApp) | |
-| `artifact-root` | Directory inside the zip to place the published output under (e.g. MyApp). Leave empty for root. | `''` |
-| `artifact-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). Patterns containing '/' are matched against the relative path, others against the file name. | `''` |
-| `build-matrix` | JSON array of `{os, runtime}` objects | `[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]` |
-| `dotnet-version` | .NET version to use | `latest` |
+| `pull-request` | Number of the pull request to check | The triggering pull request |
+| `agent-patterns` | Newline-separated regular expressions for more agent identities | `""` |
+| `close-agent-pull-requests` | Close pull requests created entirely by an agent | `true` |
+| `dry-run` | Only report the result, without commenting or closing | `false` |
 
-### `publish-artifact-immutable.yml` — Publish Artifacts (Immutable Release)
-
-Publishes a .NET project for multiple runtimes and creates a GitHub Release. This workflow zips each runtime output separately and attaches all of them to a single release. It will also post a Discord notification.
-
-The release tag/version is read from the project's `Version` property, or `VersionPrefix` combined with `VersionSuffix` if set.
-
-| Input | Description | Default |
-|---|---|---|
-| `project` | *(required)* Path to the project file (e.g. src/MyApp/MyApp.csproj) to extract version and build from. | |
-| `artifact-name` | *(required)* Base name for the generated zip files (e.g. MyApp). | |
-| `artifact-root` | Directory inside the zip to place the published output under (e.g. MyApp). Leave empty for root. | `''` |
-| `artifact-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). | `''` |
-| `build-matrix` | JSON array of `{os, runtime}` objects. | `[{"os":"windows-latest","runtime":"win-x64"},{"os":"ubuntu-latest","runtime":"linux-x64"}]` |
-| `dotnet-version` | .NET version to use. | `latest` |
-| `publish-release` | Create a GitHub Release (with tag) from the newly built ZIPs. | `true` |
-| `discord-description` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message. | `""` |
-| `discord-footer` | Newline-separated lines appended at the very end of the Discord message. | `""` |
-
-| Secret | Description |
+| Output | Description |
 |---|---|
-| `DISCORD_WEBHOOK_URL` | Discord webhook URL. |
+| `result` | `none`, `co-authored`, or `agent-only` |
 
-### `publish-artifact-combined.yml` — Publish Combined Artifact
+#### Recognized agents
 
-Publishes a .NET project for multiple runtimes, merges all outputs into a single zip, computes its SHA256 (written to the job summary), and uploads it to the GitHub Release.
+Patterns are case-insensitive regular expressions, matched against GitHub logins and against `Name <email>` of commit authors and co-authors. The defaults recognize:
 
-| Input | Description | Default |
-|---|---|---|
-| `project` | *(required)* Path/name of the project to publish (e.g. src/MyApp or MyApp) | |
-| `artifact-name` | *(required)* Base name for the generated zip file (e.g. MyPlugin) | |
-| `artifact-root` | Directory inside the zip to place the merged output under (e.g. MyPlugin). Leave empty to place the output at the root of the zip. | `''` |
-| `artifact-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). Patterns containing '/' are matched against the relative path, others against the file name. | `''` |
-| `build-matrix` | JSON array of `{os, runtime, executable-extension}` objects | `[{"os":"windows-latest","runtime":"win-x64","executable-extension":".exe"},{"os":"ubuntu-latest","runtime":"linux-x64","executable-extension":""}]` |
-| `dotnet-version` | .NET version to use | `latest` |
-| `artifact-folder` | Intermediate folder name used when merging build artifacts | `Plugin` |
-
-### `publish-artifact-combined-immutable.yml` — Publish Combined Artifact (Immutable Release)
-
-Publishes a .NET project for multiple runtimes and creates a GitHub Release. This workflow merges all runtime outputs into a single zip file and attaches it to a release. It will also post a Discord notification.
-
-The release tag/version is read from the project's `Version` property, or `VersionPrefix` combined with `VersionSuffix` if set.
-
-| Input | Description | Default |
-|---|---|---|
-| `project` | *(required)* Path to the project file (e.g. src/MyApp/MyApp.csproj) to extract version and build from. | |
-| `artifact-name` | *(required)* Output zip file name without extension (e.g. MyPlugin). | |
-| `artifact-root` | Directory inside the zip to place the merged output under (e.g. MyPlugin). Leave empty for root. | `''` |
-| `artifact-ignore` | Newline-separated list of file patterns to exclude from the zip (e.g. `*.pdb`). | `''` |
-| `build-matrix` | JSON array of `{os, runtime, executable-extension}` objects. | `[{"os":"windows-latest","runtime":"win-x64","executable-extension":".exe"},{"os":"ubuntu-latest","runtime":"linux-x64","executable-extension":""}]` |
-| `dotnet-version` | .NET version to use. | `latest` |
-| `artifact-folder` | Intermediate folder name used when merging build artifacts. | `Plugin` |
-| `publish-release` | Create a GitHub Release (with tag) from the newly built ZIP. | `true` |
-| `discord-description` | Newline-separated lines inserted below the heading, before the changelog, in the Discord message. | `""` |
-| `discord-footer` | Newline-separated lines appended at the very end of the Discord message. | `""` |
-
-| Secret | Description |
+| Agent | Identity |
 |---|---|
-| `DISCORD_WEBHOOK_URL` | Discord webhook URL. |
+| Claude Code | `noreply@anthropic.com` |
+| Claude GitHub app | `claude[bot]` |
+| GitHub Copilot in editors | `copilot@github.com` |
+| GitHub Copilot coding agent | login `Copilot`, `copilot-swe-agent[bot]`, `…+Copilot@users.noreply.github.com` |
+| Devin | `devin-ai-integration[bot]` |
+| Jules | `google-labs-jules[bot]` |
+| Cursor agent | `cursoragent@cursor.com` |
+| aider | `(aider)` in the author name |
 
-### `yml-formatter.yml` — YAML Formatter
+Add other agents with `agent-patterns`:
 
-Runs [`yamlfmt`](https://github.com/google/yamlfmt) to format or lint YAML files. Can optionally auto-commit formatted files back to the branch.
+```yaml
+    with:
+      agent-patterns: |
+        chatgpt-codex-connector\[bot\]
+        @my-agent\.example\.com
+```
 
-| Input | Description | Default |
-|---|---|---|
-| `yamlfmt-version` | yamlfmt version to install | `0.21.0` |
-| `args` | Arguments passed to yamlfmt | `.` |
-| `auto-commit` | Commit and push formatted files back to the branch | `false` |
-| `lint` | Run in lint mode (fail if files are not formatted) | `false` |
+GitHub lists at most 250 commits for a pull request, so later commits in a bigger one aren't checked.
 
-Requires `contents: write` permission when `auto-commit` is enabled.
+### `test.yml` (internal)
 
-### `validate-workflows.yml` — Workflow Linting (internal)
+Tests this repository. It lints every workflow file with [actionlint](https://github.com/rhysd/actionlint), runs the unit tests of the [workflow tools](tools), and runs the reusable workflows against the fixture projects in [`tests/fixtures`](tests/fixtures):
 
-Runs [`action-validator`](https://github.com/mpalmer/action-validator) against changed workflow files on pull requests. This is a repository-maintenance workflow (not a reusable `workflow_call`) that keeps the workflows in this repo themselves valid; it isn't meant to be called from other repositories.
+- `blazor-wasm-github-pages.yml` runs without deploying. A follow-up job checks the base path in the uploaded site.
+- `publish-nuget-immutable.yml` publishes to a folder feed in the workspace, without a release or Discord message. A follow-up job checks the `has-new` output and the uploaded packages.
+- `check-agent-authorship.yml` does a dry run against pull request #41 of this repository. A follow-up job checks that the result is `none`.
+
+It runs on pull requests and pushes to `main` and isn't meant to be called from other repositories.
+
+## Testing locally
+
+You can run `test.yml` on your machine with [act](https://github.com/nektos/act) and Docker. It needs act 0.2.89 or newer, because older versions don't support actions that run on Node 24.
+
+```sh
+act workflow_dispatch
+```
+
+[`.actrc`](.actrc) sets the runner image and limits the end-to-end tests to `ubuntu-latest`. act can't run Windows jobs in a container. Without this limit, it would run them on Linux and report a pass that doesn't mean anything. Windows is still covered when the workflow runs on GitHub.
+
+To run a single job or case:
+
+```sh
+act workflow_dispatch -j lint
+act workflow_dispatch -j dotnet-ci --matrix name:MTP
+```
+
+> [!WARNING]
+> The `blazor-wasm-github-pages` and `publish-nuget-immutable` tests currently fail under act when they upload an artifact. act's artifact server doesn't support `upload-artifact@v7` yet ([nektos/act#6022](https://github.com/nektos/act/issues/6022)). Every step before the upload still runs, including publishing to the test feed, so most problems show up locally. The uploads and the follow-up checks only run on GitHub.
+
+To run the unit tests of the workflow tools without act:
+
+```sh
+cd tools
+dotnet test
+```
+
+## Contributing
+
+See [Workflow guidelines](.agents/workflow-guidelines.md) for how workflows are structured and tested, and [Writing style](.agents/writing-style.md) for documentation.

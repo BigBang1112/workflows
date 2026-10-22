@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Workflows.Tools/Workflows.Tools.csproj" />
+  <Project Path="Workflows.Tools.Tests/Workflows.Tools.Tests.csproj" />
+</Solution>
