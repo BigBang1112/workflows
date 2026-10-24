@@ -4,7 +4,7 @@ using Workflows.Tools.GitHub;
 namespace Workflows.Tools.NuGet;
 
 /// <summary>
-/// Announces the release of the newly uploaded packages on Discord.
+/// Announces the release of the selected packages on Discord.
 /// The NuGet.org link is only included when the main package is on NuGet.org.
 /// </summary>
 internal sealed class DiscordCommand(ActionsContext context, DiscordWebhook webhook)
@@ -14,7 +14,7 @@ internal sealed class DiscordCommand(ActionsContext context, DiscordWebhook webh
     public async Task RunAsync()
     {
         var webhookUrl = context.Require("DISCORD_WEBHOOK_URL");
-        var packages = state.NewlyUploaded;
+        var packages = state.ReleasePackages;
         var main = Announcement.SelectMainPackage(packages, context.Get("MAIN_PROJECT"));
 
         var nugetAvailable = state.Results.Any(result =>

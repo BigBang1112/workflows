@@ -52,15 +52,19 @@ on:
         type: string
         default: ""
       upload-to-release:
-        description: Attach the newly uploaded .nupkg and .snupkg files to the GitHub release
+        description: Attach the released .nupkg and .snupkg files to the GitHub release
         type: boolean
         default: true
+      release-all-packages:
+        description: Include all packed packages in the release, even when they already exist on the feeds
+        type: boolean
+        default: false
       main-project:
         description: Package ID or project directory name of the main package, used for the release version and the unheaded first release notes section. When empty, the highest version determines the release version and every section has a heading.
         type: string
         default: ""
       create-release:
-        description: Create one GitHub release for the packages newly uploaded in this run
+        description: Create one GitHub release for the selected packages
         type: boolean
         default: true
       release-description:
@@ -214,11 +218,12 @@ jobs:
 
       - name: Create release
         id: release
-        if: steps.publish.outputs.has-new == 'true' && inputs.create-release
+        if: inputs.create-release && (steps.publish.outputs.has-new == 'true' || inputs.release-all-packages)
         env:
           GH_TOKEN: ${{ github.token }}
           MAIN_PROJECT: ${{ inputs.main-project }}
           UPLOAD_TO_RELEASE: ${{ inputs.upload-to-release }}
+          RELEASE_ALL_PACKAGES: ${{ inputs.release-all-packages }}
           RELEASE_TITLE_PREFIX: ${{ inputs.release-title-prefix }}
           RELEASE_DESCRIPTION: ${{ inputs.release-description }}
         run: dotnet "$WORKFLOW_TOOLS" nuget release
@@ -228,6 +233,7 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           RELEASE_URL: ${{ steps.release.outputs.url }}
+          RELEASE_ALL_PACKAGES: ${{ inputs.release-all-packages }}
           MAIN_PROJECT: ${{ inputs.main-project }}
           DISCORD_TOP_LINES: ${{ inputs.discord-top-lines }}
           DISCORD_BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}

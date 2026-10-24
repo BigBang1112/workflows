@@ -4,7 +4,7 @@ using Workflows.Tools.Processes;
 namespace Workflows.Tools.NuGet;
 
 /// <summary>
-/// Creates one GitHub release for the newly uploaded packages, with their packages as assets.
+/// Creates one GitHub release for the selected packages, with their packages as assets.
 /// The tag is the pushed tag when the workflow runs for one, otherwise "v" and the main package's version.
 /// </summary>
 /// <remarks>
@@ -17,7 +17,7 @@ internal sealed class ReleaseCommand(ActionsContext context, IProcessRunner proc
 
     public async Task RunAsync()
     {
-        var packages = state.NewlyUploaded;
+        var packages = state.ReleasePackages;
 
         if (packages.Count == 0)
         {
@@ -69,7 +69,7 @@ internal sealed class ReleaseCommand(ActionsContext context, IProcessRunner proc
         }
 
         var url = result.StandardOutput.Trim();
-        context.Log.WriteLine($"Created {url} with {packages.Count} newly uploaded packages");
+        context.Log.WriteLine($"Created {url} with {packages.Count} packages");
         context.SetOutput("created", "true");
         context.SetOutput("url", url);
     }
