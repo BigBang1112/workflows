@@ -108,3 +108,11 @@ jobs:
           ${{ inputs.enable-coverage && !steps.test-platform.outputs.mtp && '--collect "Code Coverage;Format=cobertura;IncludeTestAssembly=false"' || '' }}
           ${{ inputs.enable-coverage && format('--results-directory "{0}/coverage"', runner.temp) || '' }}
           ${{ inputs.test-args }}
+
+      - name: Upload TUnit report
+        if: ${{ !cancelled() && inputs.enable-tests }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: tunit-report-${{ matrix.os }}
+          path: ${{ runner.temp }}/tunit-aggregate/**/merged-report.html
+          if-no-files-found: ignore

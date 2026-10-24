@@ -33,6 +33,8 @@ Restores, builds, and tests a .NET solution or project on one or more runners, a
 | `enable-coverage` | Collect Cobertura coverage into `$RUNNER_TEMP/coverage` | `true` |
 | `enable-cache` | Cache NuGet packages | `true` |
 
+When TUnit generates a combined HTML test report, the workflow saves it as the `tunit-report-[runner]` artifact, even when tests fail. Download it from the workflow run to view `merged-report.html`. Projects without a TUnit report skip the upload.
+
 ### Coverage
 
 Both test platforms use Microsoft code coverage, so the reports have the same format and content. Test assemblies are excluded, and only the code under test is measured.
