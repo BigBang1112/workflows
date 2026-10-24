@@ -27,6 +27,7 @@ Restores, builds, and tests a .NET solution or project on one or more runners, a
 | `os` | JSON array of runners | `["ubuntu-latest", "windows-latest"]` |
 | `working-directory` | Directory with the solution or project, relative to the repository root | `.` |
 | `configuration` | Build configuration | `Release` |
+| `restore-args` | Extra `dotnet restore` arguments | `""` |
 | `build-args` | Extra `dotnet build` arguments | `""` |
 | `test-args` | Extra `dotnet test` arguments | `""` |
 | `enable-tests` | Run `dotnet test` | `true` |
