@@ -315,7 +315,7 @@ You can run `test.yml` on your machine with [act](https://github.com/nektos/act)
 act workflow_dispatch
 ```
 
-[`.actrc`](.actrc) sets the runner image and limits the end-to-end tests to `ubuntu-latest`. act can't run Windows jobs in a container. Without this limit, it would run them on Linux and report a pass that doesn't mean anything. Windows is still covered when the workflow runs on GitHub.
+[`.actrc`](.actrc) maps both `ubuntu-latest` and `ubuntu-slim` to the same local runner image and limits the end-to-end tests to `ubuntu-latest`. This checks the job steps locally, but doesn't reproduce slim's installed software or resource limits. act can't run Windows jobs in a container. Without the end-to-end limit, it would run them on Linux and report a pass that doesn't mean anything. Windows and the actual slim environment are covered when the workflow runs on GitHub.
 
 To run a single job or case:
 

@@ -34,7 +34,7 @@ env:
 jobs:
   check:
     name: Check AI agent authorship
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
 
     outputs:
       result: ${{ steps.check.outputs.result }}
