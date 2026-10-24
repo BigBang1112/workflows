@@ -32,9 +32,16 @@ Restores, builds, and tests a .NET solution or project on one or more runners, a
 | `test-args` | Extra `dotnet test` arguments | `""` |
 | `enable-tests` | Run `dotnet test` | `true` |
 | `enable-coverage` | Collect Cobertura coverage into `$RUNNER_TEMP/coverage` | `true` |
+| `coverage-artifact-name` | Base name of the coverage report artifact, with the runner name appended. Set a distinct name when calling this workflow from several matrix jobs. | `coverage-report` |
 | `enable-cache` | Cache NuGet packages | `true` |
 
+When TUnit generates a combined HTML test report, the workflow saves it as the `tunit-report-[runner]` artifact, even when tests fail. Download it from the workflow run to view `merged-report.html`. Projects without a TUnit report skip the upload.
+
 ### Coverage
+
+With coverage enabled, [ReportGenerator](https://github.com/danielpalme/ReportGenerator) adds line and branch coverage totals and a breakdown by assembly and class to each runner's job summary. The `coverage-report-[runner]` artifact contains an interactive HTML report with source line highlighting and a merged `Cobertura.xml` report. Download and extract the artifact, then open `index.html` to browse the report offline.
+
+Reporting still runs after failed tests when coverage files are available. A test run that produces no Cobertura files fails the report step instead of showing an empty coverage report. Set `enable-coverage: false` to skip collection and reporting.
 
 Both test platforms use Microsoft code coverage, so the reports have the same format and content. Test assemblies are excluded, and only the code under test is measured.
 
@@ -308,7 +315,7 @@ You can run `test.yml` on your machine with [act](https://github.com/nektos/act)
 act workflow_dispatch
 ```
 
-[`.actrc`](.actrc) sets the runner image and limits the end-to-end tests to `ubuntu-latest`. act can't run Windows jobs in a container. Without this limit, it would run them on Linux and report a pass that doesn't mean anything. Windows is still covered when the workflow runs on GitHub.
+[`.actrc`](.actrc) maps both `ubuntu-latest` and `ubuntu-slim` to the same local runner image and limits the end-to-end tests to `ubuntu-latest`. This checks the job steps locally, but doesn't reproduce slim's installed software or resource limits. act can't run Windows jobs in a container. Without the end-to-end limit, it would run them on Linux and report a pass that doesn't mean anything. Windows and the actual slim environment are covered when the workflow runs on GitHub.
 
 To run a single job or case:
 
@@ -318,7 +325,7 @@ act workflow_dispatch -j dotnet-ci --matrix name:MTP
 ```
 
 > [!WARNING]
-> The `blazor-wasm-github-pages` and `publish-nuget-immutable` tests currently fail under act when they upload an artifact. act's artifact server doesn't support `upload-artifact@v7` yet ([nektos/act#6022](https://github.com/nektos/act/issues/6022)). Every step before the upload still runs, including publishing to the test feed, so most problems show up locally. The uploads and the follow-up checks only run on GitHub.
+> The `dotnet-ci` tests with coverage enabled, `blazor-wasm-github-pages`, and `publish-nuget-immutable` currently fail under act when they upload an artifact. act's artifact server doesn't support `upload-artifact@v7` yet ([nektos/act#6022](https://github.com/nektos/act/issues/6022)). Every step before the upload still runs, including generating coverage summaries and publishing to the test feed, so most problems show up locally. The uploads and the follow-up checks only run on GitHub.
 
 To run the unit tests of the workflow tools without act:
 

@@ -43,6 +43,10 @@ on:
         description: Collect Cobertura code coverage into $RUNNER_TEMP/coverage
         type: boolean
         default: true
+      coverage-artifact-name:
+        description: Base name of the coverage report artifact. The runner name is appended. Use a distinct name for each caller matrix job.
+        type: string
+        default: coverage-report
       enable-cache:
         description: Cache NuGet packages
         type: boolean
@@ -105,6 +109,7 @@ jobs:
       # Both platforms use Microsoft code coverage, so the Cobertura reports are the same.
       # VSTest gets it from Microsoft.NET.Test.Sdk, but measures the test assembly unless told not to.
       - name: Test
+        id: test
         if: inputs.enable-tests
         run: >
           dotnet test -c ${{ inputs.configuration }} --no-build
@@ -112,3 +117,34 @@ jobs:
           ${{ inputs.enable-coverage && !steps.test-platform.outputs.mtp && '--collect "Code Coverage;Format=cobertura;IncludeTestAssembly=false"' || '' }}
           ${{ inputs.enable-coverage && format('--results-directory "{0}/coverage"', runner.temp) || '' }}
           ${{ inputs.test-args }}
+
+      - name: Generate coverage report
+        id: coverage-report
+        if: ${{ !cancelled() && inputs.enable-coverage && (steps.test.outcome == 'success' || steps.test.outcome == 'failure') }}
+        uses: danielpalme/ReportGenerator-GitHub-Action@v5
+        with:
+          reports: ${{ runner.temp }}/coverage/**/*.cobertura.xml
+          targetdir: ${{ runner.temp }}/coverage-report
+          reporttypes: Html;MarkdownSummaryGithub;Cobertura
+          title: Code coverage (${{ matrix.os }})
+          toolpath: ${{ runner.temp }}/reportgenerator
+
+      - name: Publish coverage summary
+        if: ${{ !cancelled() && steps.coverage-report.outcome == 'success' }}
+        run: cat "$RUNNER_TEMP/coverage-report/SummaryGithub.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        if: ${{ !cancelled() && steps.coverage-report.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.coverage-artifact-name }}-${{ matrix.os }}
+          path: ${{ runner.temp }}/coverage-report
+          if-no-files-found: error
+
+      - name: Upload TUnit report
+        if: ${{ !cancelled() && inputs.enable-tests }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: tunit-report-${{ matrix.os }}
+          path: ${{ runner.temp }}/tunit-aggregate/**/merged-report.html
+          if-no-files-found: ignore

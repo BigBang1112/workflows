@@ -1,4 +1,5 @@
 -P ubuntu-latest=catthehacker/ubuntu:act-latest
+-P ubuntu-slim=catthehacker/ubuntu:act-latest
 --container-architecture linux/amd64
 --input os=["ubuntu-latest"]
 --artifact-server-path .act/artifacts

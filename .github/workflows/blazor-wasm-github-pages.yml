@@ -106,7 +106,7 @@ jobs:
     name: Deploy
     if: inputs.deploy
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
 
     permissions:
       pages: write
