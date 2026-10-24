@@ -1,7 +1,7 @@
 namespace Workflows.Tools.NuGet;
 
 /// <summary>
-/// Composes the GitHub release notes and the Discord message for newly uploaded packages.
+/// Composes the GitHub release notes and the Discord message for the selected packages.
 /// </summary>
 internal static class Announcement
 {

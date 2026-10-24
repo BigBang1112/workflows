@@ -103,7 +103,7 @@ Deployments run one at a time per repository. A new deployment waits for the run
 
 ### `publish-nuget-immutable.yml`
 
-Builds, tests, packs, and publishes .NET packages to NuGet.org, GitHub Packages, and custom feeds. It then creates one GitHub release for the packages that were uploaded for the first time, which works with [immutable releases](https://docs.github.com/repositories/releasing-projects-on-github/about-releases), and can announce it on Discord.
+Builds, tests, packs, and publishes .NET packages to NuGet.org, GitHub Packages, and custom feeds. It then creates one GitHub release with package assets, supports [immutable releases](https://docs.github.com/repositories/releasing-projects-on-github/about-releases), and can announce it on Discord.
 
 ```yaml
 on:
@@ -137,9 +137,10 @@ jobs:
 | `push-to-github` | Publish to GitHub Packages | `true` |
 | `push-to-custom-feeds` | Publish to `custom-feed-urls` (requires `CUSTOM_FEED_API_KEYS`) | `false` |
 | `custom-feed-urls` | Newline-separated feed URLs. A relative folder path is resolved from the repository root. | `""` |
-| `upload-to-release` | Attach the newly uploaded `.nupkg` and `.snupkg` files to the release | `true` |
+| `upload-to-release` | Attach the released `.nupkg` and `.snupkg` files to the release | `true` |
+| `release-all-packages` | Include all packed packages in the release, even when they already exist on the feeds | `false` |
 | `main-project` | Package ID or project directory name of the main package (see [Release notes](#release-notes)) | `""` |
-| `create-release` | Create a GitHub release for the newly uploaded packages | `true` |
+| `create-release` | Create a GitHub release for the selected packages | `true` |
 | `release-description` | Text placed before the release notes in the release | `""` |
 | `send-discord-message` | Post the release notes to Discord after the release is created | `false` |
 | `discord-top-lines` | Newline-separated lines inserted below the heading, before the release notes, in the Discord message | `""` |
@@ -210,7 +211,16 @@ Every package is pushed to each selected feed, and its `.snupkg` symbols go to N
 - `failed`: the push failed, or the feed's API key is missing.
 - `unconfirmed`: the push succeeded, but the output doesn't confirm a new upload.
 
-**Only `uploaded` makes a package part of the release.** Rerunning the workflow after a partial failure releases only what is new, and a symbols-only upload doesn't count. When any feed reports `failed` or `unconfirmed`, the job still creates the release for the uploaded packages and then fails.
+By default, **only `uploaded` makes a package part of the release.** Rerunning the workflow after a partial failure releases only what is new, and a symbols-only upload doesn't count. When any feed reports `failed` or `unconfirmed`, the job still creates the release for the selected packages and then fails.
+
+Set `release-all-packages: true` to attach every packed `.nupkg` and its available `.snupkg`, including packages already on the feeds. This also creates a release when every push is a duplicate. Release notes, the main package's version, and Discord announcements use all packed packages in this mode. The `has-new` output still reports only new feed uploads. `upload-to-release: false` still skips assets, and `create-release: false` skips the release entirely.
+
+```yaml
+    with:
+      release-all-packages: true
+```
+
+This option creates a new release. A release for the selected tag must not already exist.
 
 The packed packages are also kept as the `nuget-packages` artifact.
 

@@ -52,6 +52,25 @@ public sealed class DiscordCommandTests
     }
 
     [TestMethod]
+    public async Task Run_AllPackagesAnnouncesExistingPackagesWithoutNewUploads()
+    {
+        using var runner = CreateRunner("New notes", PushStatus.Duplicate);
+        runner.Environment["RELEASE_ALL_PACKAGES"] = "true";
+        runner.Environment["MAIN_PROJECT"] = "Existing";
+        runner.State.Manifest = [runner.State.NewlyUploaded[0], runner.Entry("Existing", "3.0.0", "Existing notes")];
+        runner.State.NewlyUploaded = [];
+        runner.State.Results = [new PublishResult("Existing", "3.0.0", new() { [PublishCommand.NuGetOrg] = PushStatus.Duplicate })];
+        var handler = new FakeHttpHandler();
+
+        await new DiscordCommand(runner.Context, new DiscordWebhook(new HttpClient(handler))).RunAsync();
+
+        var message = Content(handler.Requests.Single().Body);
+        StringAssert.StartsWith(message, "## Existing 3.0.0\n\nExisting notes");
+        StringAssert.Contains(message, "### GBX.NET 2.4.4\n\nNew notes");
+        StringAssert.Contains(message, "NuGet: <https://www.nuget.org/packages/Existing/3.0.0>");
+    }
+
+    [TestMethod]
     public async Task Run_ReportsDiscordErrorWithoutWebhookUrl()
     {
         using var runner = CreateRunner("- Changed a thing");

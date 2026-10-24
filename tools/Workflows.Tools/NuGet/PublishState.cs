@@ -28,6 +28,8 @@ internal sealed class PublishState(ActionsContext context)
 
     public string ReleaseNotesPath => context.TempPath("release-notes.md");
 
+    public IReadOnlyList<PackageEntry> ReleasePackages => context.GetBool("RELEASE_ALL_PACKAGES", false) ? Manifest : NewlyUploaded;
+
     public IReadOnlyList<PackageEntry> Manifest
     {
         get => Read<List<PackageEntry>>("manifest.json");
