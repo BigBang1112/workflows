@@ -66,6 +66,7 @@ jobs:
       os: ${{ inputs.os || '["ubuntu-latest", "windows-latest"]' }}
       working-directory: ${{ matrix.working-directory }}
       enable-coverage: ${{ matrix.enable-coverage }}
+      coverage-artifact-name: coverage-${{ matrix.name }}
 
   blazor-wasm-github-pages:
     name: blazor-wasm-github-pages
