@@ -52,7 +52,7 @@ internal static class Announcement
 
     /// <summary>
     /// The main package gets a "## ID Version" heading followed by the top lines and its notes.
-    /// Other packages follow in their original order, then the links and the bottom lines.
+    /// Other packages with notes follow in their original order, then the links and the bottom lines.
     /// </summary>
     public static string DiscordMessage(
         IReadOnlyList<PackageEntry> packages,
@@ -69,9 +69,19 @@ internal static class Announcement
             mainSection.Add(top);
         }
 
-        mainSection.Add(NotesOf(main));
+        if (main.Notes.Length > 0)
+        {
+            mainSection.Add(main.Notes);
+        }
 
-        List<string> sections = [string.Join("\n\n", mainSection), .. packages.Where(package => package != main).Select(Section)];
+        // Discord already spaces headings, so the notes follow the heading directly.
+        List<string> sections =
+        [
+            string.Join("\n\n", mainSection),
+            .. packages
+                .Where(package => package != main && package.Notes.Length > 0)
+                .Select(package => $"### {package.Id} {package.Version}\n{package.Notes}"),
+        ];
         List<string> links = [$"GitHub: <{releaseUrl}>"];
 
         if (nugetAvailable)

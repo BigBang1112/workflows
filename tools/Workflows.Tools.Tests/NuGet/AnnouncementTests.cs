@@ -101,12 +101,22 @@ public sealed class AnnouncementTests
 
         Assert.AreEqual(
             "## GBX.NET 2.4.4\n\nIntroduction\n\n- Added a chunk\n\n"
-            + "### GBX.NET.PAK 2.4.4\n\n- Fixed blocks\n\n"
-            + "### GBX.NET.Crypto 1.2.2\n\n- Added MD5\n\n"
+            + "### GBX.NET.PAK 2.4.4\n- Fixed blocks\n\n"
+            + "### GBX.NET.Crypto 1.2.2\n- Added MD5\n\n"
             + $"GitHub: <{releaseUrl}>\n"
             + "NuGet: <https://nuget.org/packages/GBX.NET/2.4.4>\n\n"
             + "Thanks for using Package.X!\n",
             message);
         Assert.IsFalse(withoutNuGet.Contains("NuGet:"));
+    }
+
+    [TestMethod]
+    public void DiscordMessage_LeavesOutPackagesWithoutNotes()
+    {
+        PackageEntry[] packages = [Package("A", "1.0.0"), Package("B", "1.0.0"), Package("C", "1.0.0", "- Added")];
+
+        var message = Announcement.DiscordMessage(packages, packages[0], "https://release", false, "Introduction", "");
+
+        Assert.AreEqual("## A 1.0.0\n\nIntroduction\n\n### C 1.0.0\n- Added\n\nGitHub: <https://release>\n", message);
     }
 }
