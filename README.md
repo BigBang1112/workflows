@@ -241,7 +241,7 @@ The release tag is the pushed tag when the workflow runs for one (and the releas
 
 #### Discord
 
-The message starts with a `## [ID] [Version]` heading for the main package, followed by `discord-top-lines` and its notes. The other packages follow, then links to the release and, when the main package is on NuGet.org, to its NuGet page. Long messages are split at line breaks into several messages, and rate-limited requests are retried.
+The message starts with a `## [ID] [Version]` heading for the main package, followed by `discord-top-lines` and its notes. The other packages with release notes follow, each under a `### [ID] [Version]` heading, then links to the release and, when the main package is on NuGet.org, to its NuGet page. Long messages are split at line breaks into several messages, and rate-limited requests are retried.
 
 ### `check-agent-authorship.yml`
 
