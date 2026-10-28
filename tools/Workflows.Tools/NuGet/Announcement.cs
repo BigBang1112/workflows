@@ -76,7 +76,7 @@ internal static class Announcement
 
         if (nugetAvailable)
         {
-            links.Add($"NuGet: <https://www.nuget.org/packages/{main.Id}/{main.Version}>");
+            links.Add($"NuGet: <https://nuget.org/packages/{main.Id}/{main.Version}>");
         }
 
         sections.Add(string.Join("\n", links));

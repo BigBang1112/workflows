@@ -104,7 +104,7 @@ public sealed class AnnouncementTests
             + "### GBX.NET.PAK 2.4.4\n\n- Fixed blocks\n\n"
             + "### GBX.NET.Crypto 1.2.2\n\n- Added MD5\n\n"
             + $"GitHub: <{releaseUrl}>\n"
-            + "NuGet: <https://www.nuget.org/packages/GBX.NET/2.4.4>\n\n"
+            + "NuGet: <https://nuget.org/packages/GBX.NET/2.4.4>\n\n"
             + "Thanks for using Package.X!\n",
             message);
         Assert.IsFalse(withoutNuGet.Contains("NuGet:"));
