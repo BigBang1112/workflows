@@ -66,7 +66,7 @@ public sealed class DiscordCommandTests
 
         var message = Content(handler.Requests.Single().Body);
         StringAssert.StartsWith(message, "## Existing 3.0.0\n\nExisting notes");
-        StringAssert.Contains(message, "### GBX.NET 2.4.4\n\nNew notes");
+        StringAssert.Contains(message, "### GBX.NET 2.4.4\nNew notes");
         StringAssert.Contains(message, "NuGet: <https://www.nuget.org/packages/Existing/3.0.0>");
     }
 
