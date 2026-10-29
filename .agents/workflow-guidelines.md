@@ -18,7 +18,7 @@ When a step needs loops, parsing, retries, API calls, or more than a few conditi
 
 ## C# for complex logic
 
-Complex logic goes into [`Workflows.Tools`](../tools/Workflows.Tools), a console app with one command per workflow step, such as `nuget pack`. Commands are grouped by workflow in folders (`NuGet/`, `PullRequests/`), and code that several workflows can share has its own folder (`GitHub/`, `Discord/`, `Processes/`). Use `GitHubApi` for GitHub REST API calls.
+Complex logic goes into [`Workflows.Tools`](../tools/Workflows.Tools), a console app with one command per workflow step, such as `nuget pack`. Commands are grouped by workflow in folders (`NuGet/`, `Apps/`, `PullRequests/`), and code that several workflows can share has its own folder (`GitHub/`, `Discord/`, `Processes/`). Use `GitHubApi` for GitHub REST API calls.
 
 A reusable workflow runs in the caller's repository, so it can't reach this repository's files through a normal checkout. [`publish-nuget-immutable.yml`](../.github/workflows/publish-nuget-immutable.yml) shows the steps to copy:
 
