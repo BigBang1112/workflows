@@ -1,0 +1,208 @@
+name: Publish .NET App (Immutable Release)
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: Project to publish, as a project file or the directory that contains it
+        type: string
+        required: true
+      dotnet-version:
+        description: .NET SDK version to install (e.g. 10.0.x). When empty, the SDK from global.json in the repository root is used, or the runner's preinstalled SDK if there is none.
+        type: string
+        default: ""
+      workloads:
+        description: Comma-separated .NET workloads to install (e.g. wasm-tools)
+        type: string
+        default: ""
+      os:
+        description: JSON array of runners to publish on. Their OS and architecture name the assets, so each runner needs a different combination.
+        type: string
+        default: '["ubuntu-latest", "windows-latest"]'
+      configuration:
+        description: Build configuration
+        type: string
+        default: Release
+      publish-args:
+        description: Extra arguments for dotnet publish
+        type: string
+        default: ""
+      files:
+        description: Newline-separated globs of the published files to package, relative to the publish output. When empty, every published file is packaged.
+        type: string
+        default: ""
+      package-directory:
+        description: Directory in the repository whose files are added to every zip, next to the published files
+        type: string
+        default: ""
+      asset-name:
+        description: Name of the zip assets, without the extension. Defaults to the repository name.
+        type: string
+        default: ""
+      merge-runners:
+        description: Package the files of every runner into one zip, instead of one zip per runner
+        type: boolean
+        default: false
+      artifact-name:
+        description: Name of the artifact with the zip assets. Set a distinct name when calling this workflow several times in one run.
+        type: string
+        default: release-assets
+      create-release:
+        description: Create a GitHub release with the zip assets
+        type: boolean
+        default: true
+      tag:
+        description: Tag of the release. Defaults to the pushed tag. A tag that doesn't exist yet is created at the current commit.
+        type: string
+        default: ""
+      release-title-prefix:
+        description: Text before the version in the GitHub release title, separated by one space
+        type: string
+        default: ""
+      release-description:
+        description: Text placed before the release notes in the GitHub release
+        type: string
+        default: ""
+      generate-release-notes:
+        description: Add the release notes that GitHub generates from merged pull requests
+        type: boolean
+        default: false
+    outputs:
+      release-url:
+        description: URL of the created GitHub release
+        value: ${{ jobs.release.outputs.url }}
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Publish (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    permissions:
+      contents: read
+
+    strategy:
+      matrix:
+        os: ${{ fromJson(inputs.os) }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+          workloads: ${{ inputs.workloads }}
+
+      - name: Publish
+        env:
+          PROJECT: ${{ inputs.project }}
+        run: dotnet publish "$PROJECT" -c ${{ inputs.configuration }} -o "$RUNNER_TEMP/app-publish" -p:ContinuousIntegrationBuild=true ${{ inputs.publish-args }}
+
+      # Artifacts don't keep file permissions, but a tar does, so Linux and macOS executables stay executable.
+      # The relative paths keep GNU tar on Windows from reading the drive letter as a remote host.
+      - name: Archive published output
+        working-directory: ${{ runner.temp }}/app-publish
+        run: tar -cf "../${{ runner.os }}-${{ runner.arch }}.tar" .
+
+      - name: Upload build
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}-build-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/${{ runner.os }}-${{ runner.arch }}.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Package and release
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    outputs:
+      url: ${{ steps.release.outputs.url }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # A reusable workflow only checks out the caller's repository. The tools come from the
+      # exact commit of this workflow, so callers don't need copies of them.
+      - name: Checkout workflow tools
+        if: ${{ !env.ACT }}
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .workflow-tools
+          sparse-checkout: tools
+
+      # act (local testing) doesn't provide the job.workflow_* context. It only runs this
+      # repository's own tests, where the tools are already in the workspace.
+      - name: Copy workflow tools
+        if: ${{ env.ACT }}
+        run: mkdir .workflow-tools && cp -r tools .workflow-tools/
+
+      # Outside the workspace, the caller's global.json and MSBuild files don't affect the tools,
+      # and the package directory doesn't pick them up.
+      - name: Move workflow tools out of the workspace
+        run: mv .workflow-tools "$RUNNER_TEMP/workflow-tools"
+
+      - name: Setup .NET for workflow tools
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build workflow tools
+        working-directory: ${{ runner.temp }}/workflow-tools
+        run: |
+          dotnet build tools/Workflows.Tools -c Release -o bin
+          echo "WORKFLOW_TOOLS=$PWD/bin/Workflows.Tools.dll" >> "$GITHUB_ENV"
+
+      - name: Download builds
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ${{ inputs.artifact-name }}-build-*
+          path: ${{ runner.temp }}/app-builds
+          merge-multiple: true
+
+      - name: Package
+        env:
+          ASSET_NAME: ${{ inputs.asset-name || github.event.repository.name }}
+          FILES: ${{ inputs.files }}
+          PACKAGE_DIRECTORY: ${{ inputs.package-directory }}
+          MERGE_RUNNERS: ${{ inputs.merge-runners }}
+        run: dotnet "$WORKFLOW_TOOLS" app package
+
+      - name: Upload assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ runner.temp }}/app-assets/*.zip
+          if-no-files-found: error
+
+      - name: Create release
+        id: release
+        if: inputs.create-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          RELEASE_TITLE_PREFIX: ${{ inputs.release-title-prefix }}
+          RELEASE_DESCRIPTION: ${{ inputs.release-description }}
+          GENERATE_RELEASE_NOTES: ${{ inputs.generate-release-notes }}
+        run: dotnet "$WORKFLOW_TOOLS" app release

@@ -158,6 +158,69 @@ jobs:
           test -f Fixture.Core.1.0.0.snupkg
           test -f Fixture.Extra.1.1.0-beta.1.nupkg
 
+  # Packages the fixture app without a release. The merged case packages only the executables and a
+  # package directory into one zip, like a Native AOT app with a plugin folder.
+  publish-app-immutable:
+    name: publish-app-immutable (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: per runner
+            artifact-name: app-per-runner
+            merge-runners: false
+            files: ""
+            package-directory: ""
+          - name: merged
+            artifact-name: app-merged
+            merge-runners: true
+            files: |
+              FixtureApp
+              FixtureApp.exe
+            package-directory: tests/fixtures/app/Plugin
+    uses: ./.github/workflows/publish-app-immutable.yml
+    # The called workflow declares this for its release job, which only packages here.
+    permissions:
+      contents: write
+    with:
+      project: tests/fixtures/app/FixtureApp
+      dotnet-version: 10.0.x
+      os: ${{ inputs.os || '["ubuntu-latest", "windows-latest"]' }}
+      asset-name: FixtureApp
+      files: ${{ matrix.files }}
+      package-directory: ${{ matrix.package-directory }}
+      merge-runners: ${{ matrix.merge-runners }}
+      artifact-name: ${{ matrix.artifact-name }}
+      create-release: false
+
+  # Runs on ubuntu-latest for unzip and zipinfo.
+  publish-app-immutable-assets:
+    name: publish-app-immutable (check assets)
+    needs: publish-app-immutable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download per-runner assets
+        uses: actions/download-artifact@v8
+        with:
+          name: app-per-runner
+          path: per-runner
+
+      - name: Download merged asset
+        uses: actions/download-artifact@v8
+        with:
+          name: app-merged
+          path: merged
+
+      - name: Check per-runner assets
+        run: |
+          unzip -l per-runner/FixtureApp-linux-x64.zip FixtureApp FixtureApp.dll
+          unzip -l per-runner/FixtureApp-windows-x64.zip FixtureApp.exe FixtureApp.dll
+
+      - name: Check merged asset
+        run: |
+          test "$(zipinfo -1 merged/FixtureApp.zip)" = "$(printf 'FixtureApp\nFixtureApp.exe\nplugin.txt')"
+          zipinfo merged/FixtureApp.zip FixtureApp | grep '^-rwxr-xr-x'
+
   # The required status check for pull requests into main. It passes only when every test above passed.
   validate:
     name: validate
@@ -169,6 +232,7 @@ jobs:
       - blazor-wasm-github-pages-site
       - check-agent-authorship-result
       - publish-nuget-immutable-packages
+      - publish-app-immutable-assets
     runs-on: ubuntu-slim
     steps:
       - name: Check test results
