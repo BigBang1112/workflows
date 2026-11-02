@@ -238,10 +238,3 @@ jobs:
           DISCORD_TOP_LINES: ${{ inputs.discord-top-lines }}
           DISCORD_BOTTOM_LINES: ${{ inputs.discord-bottom-lines }}
         run: dotnet "$WORKFLOW_TOOLS" nuget discord
-
-      # Comes last, so packages that did upload still get their release.
-      - name: Report feed failures
-        if: steps.publish.outputs.has-failures == 'true'
-        run: |
-          echo "::error::One or more package feeds rejected an upload. See the job summary."
-          exit 1

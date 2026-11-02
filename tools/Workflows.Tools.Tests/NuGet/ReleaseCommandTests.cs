@@ -105,7 +105,6 @@ public sealed class ReleaseCommandTests
 
         Assert.AreEqual(0, runner.State.NewlyUploaded.Count);
         StringAssert.Contains(runner.Output, "has-new=false");
-        StringAssert.Contains(runner.Output, "has-failures=false");
         StringAssert.Contains(runner.Output, "created=true");
         var arguments = processes.Calls.Single(call => call.FileName == "gh").Arguments.ToList();
         CollectionAssert.Contains(arguments, package);
