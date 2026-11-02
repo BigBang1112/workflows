@@ -1,3 +1,5 @@
+using Workflows.Tools.GitHub;
+
 namespace Workflows.Tools.NuGet;
 
 /// <summary>
@@ -46,7 +48,7 @@ internal static class Announcement
             .OrderBy(package => package.Id, StringComparer.OrdinalIgnoreCase)
             .Select(Section));
 
-        sections.Add($"Assets were automatically generated using the [publish workflow](<{runUrl}>).");
+        sections.Add(GitHubRelease.GeneratedBy(runUrl));
         return string.Join("\n\n", sections) + "\n";
     }
 

@@ -1,3 +1,4 @@
+using Workflows.Tools.Apps;
 using Workflows.Tools.Discord;
 using Workflows.Tools.GitHub;
 using Workflows.Tools.NuGet;
@@ -18,6 +19,8 @@ try
         ["nuget", "publish"] => new PublishCommand(context, processes).RunAsync(),
         ["nuget", "release"] => new ReleaseCommand(context, processes).RunAsync(),
         ["nuget", "discord"] => new DiscordCommand(context, new DiscordWebhook(http)).RunAsync(),
+        ["app", "package"] => new PackageAppCommand(context).RunAsync(),
+        ["app", "release"] => new ReleaseAppCommand(context, processes, GitHubApi.FromContext(context, http)).RunAsync(),
         ["pull-request", "check-agent-authorship"] => new CheckAgentAuthorshipCommand(context, GitHubApi.FromContext(context, http)).RunAsync(),
         _ => null,
     };
@@ -27,6 +30,7 @@ try
         Console.Error.WriteLine("""
             Usage:
               Workflows.Tools nuget <build|test|pack|publish|release|discord>
+              Workflows.Tools app <package|release>
               Workflows.Tools pull-request check-agent-authorship
             """);
         return 2;

@@ -243,6 +243,97 @@ The release tag is the pushed tag when the workflow runs for one (and the releas
 
 The message starts with a `## [ID] [Version]` heading for the main package, followed by `discord-top-lines` and its notes. The other packages with release notes follow, each under a `### [ID] [Version]` heading, then links to the release and, when the main package is on NuGet.org, to its NuGet page. Long messages are split at line breaks into several messages, and rate-limited requests are retried.
 
+### `publish-app-immutable.yml`
+
+Publishes a .NET app on several runners, packages the output into zip files, and creates a GitHub release with them as assets. The release is created complete in a single call, so it works with [immutable releases](https://docs.github.com/repositories/releasing-projects-on-github/about-releases), which don't accept new assets once they're published.
+
+```yaml
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    uses: bigbang1112/workflows/.github/workflows/publish-app-immutable.yml@main
+    permissions:
+      contents: write
+    with:
+      project: src/MyApp
+      dotnet-version: 10.0.x
+```
+
+Pushing `v1.0.0` creates the `1.0.0` release with `my-repo-linux-x64.zip` and `my-repo-windows-x64.zip`. The build jobs only read the repository. The release job needs `contents: write`.
+
+| Input | Description | Default |
+|---|---|---|
+| `project` | *(required)* Project to publish, as a project file or the directory that contains it | |
+| `dotnet-version` | .NET SDK version to install. When empty, the SDK from `global.json` in the repository root is used, or the runner's preinstalled SDK if there is none. | `""` |
+| `workloads` | Comma-separated workloads to install | `""` |
+| `os` | JSON array of runners to publish on. Each one needs a different OS or architecture. | `["ubuntu-latest", "windows-latest"]` |
+| `configuration` | Build configuration | `Release` |
+| `publish-args` | Extra `dotnet publish` arguments | `""` |
+| `files` | Newline-separated globs of the published files to package, relative to the publish output | `""` (every file) |
+| `package-directory` | Directory in the repository whose files are added to every zip, next to the published files | `""` |
+| `asset-name` | Name of the zip assets, without the extension | Repository name |
+| `merge-runners` | Package the files of every runner into one zip, instead of one zip per runner | `false` |
+| `artifact-name` | Name of the artifact with the zip assets. Set a distinct name when calling this workflow several times in one run. | `release-assets` |
+| `create-release` | Create a GitHub release with the zip assets | `true` |
+| `tag` | Tag of the release. A tag that doesn't exist yet is created at the current commit. | The pushed tag |
+| `release-title-prefix` | Text before the version in the release title, separated by one space | `""` |
+| `release-description` | Text placed before the release notes in the release | `""` |
+| `generate-release-notes` | Add the release notes that GitHub generates from merged pull requests | `false` |
+
+| Output | Description |
+|---|---|
+| `release-url` | URL of the created GitHub release |
+
+#### Assets
+
+Each runner gets its own zip, named `[asset-name]-[os]-[arch].zip` after the runner's OS and architecture, like `-linux-x64`, `-windows-x64`, or `-macos-arm64`. With `merge-runners: true`, the files of every runner go into one `[asset-name].zip` instead.
+
+- `files` picks the published files. **Every pattern must match a file on at least one runner, and every runner must keep at least one file**, so a typo fails the run instead of leaving a file out.
+- The files of `package-directory` go to the root of every zip, next to the published files.
+- A zip can't contain the same path twice. Merging framework-dependent builds fails, for example, because every runner publishes `MyApp.dll`. Set `files` to the files that differ per runner.
+
+The builds pass between jobs as tar files, because artifacts don't keep file permissions. Executables built on Linux and macOS stay executable when the zip is extracted there. Every other file gets the usual `644` mode.
+
+The job summary lists the SHA-256 hash of each asset. The zips are also kept as the `release-assets` artifact, even with `create-release: false`.
+
+#### Native AOT with a plugin folder
+
+Native AOT can't compile for another OS, so each runner builds its own executable. This example packages both executables with the files of a Blender add-on folder into one zip:
+
+```yaml
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    uses: bigbang1112/workflows/.github/workflows/publish-app-immutable.yml@main
+    permissions:
+      contents: write
+    with:
+      project: BlenderGbxTools
+      dotnet-version: 10.0.x
+      files: |
+        BlenderGbxTools
+        BlenderGbxTools.exe
+      package-directory: BlenderPlugin
+      merge-runners: true
+      generate-release-notes: true
+```
+
+The release gets one `BlenderGbxTools.zip` with the add-on files and both executables at its root. The `.dbg` and `.pdb` symbol files stay out, because `files` doesn't match them.
+
+#### Release
+
+The tag is `tag` when it is set, otherwise the pushed tag. A pushed tag must already exist on GitHub, and a run without either fails. The title is the tag without a leading `v`, after `release-title-prefix`.
+
+The notes start with `release-description`, followed by the notes GitHub generates when `generate-release-notes` is set, and end with a link to the workflow run.
+
+**The release must not exist yet.** With immutable releases enabled, a workflow that runs on `release: published` and uploads assets afterwards fails, because the release is already locked. Push a tag instead, and let this workflow create the release.
+
 ### `check-agent-authorship.yml`
 
 Checks a pull request for commits authored or co-authored by AI agents:
@@ -311,6 +402,7 @@ Tests this repository. It lints every workflow file with [actionlint](https://gi
 
 - `blazor-wasm-github-pages.yml` runs without deploying. A follow-up job checks the base path in the uploaded site.
 - `publish-nuget-immutable.yml` publishes to a folder feed in the workspace, without a release or Discord message. A follow-up job checks the `has-new` output and the uploaded packages.
+- `publish-app-immutable.yml` packages the fixture app in [`tests/fixtures/app`](tests/fixtures/app) once per runner and once merged with a package directory, without a release. A follow-up job checks the contents of the zips and that the Linux executable stays executable.
 - `check-agent-authorship.yml` does a dry run against pull request #41 of this repository. A follow-up job checks that the result is `none`.
 
 The `validate` job passes only when every other job passed. It is the required status check for pull requests into `main`.
@@ -336,6 +428,8 @@ act workflow_dispatch -j dotnet-ci --matrix name:MTP
 
 > [!WARNING]
 > The `dotnet-ci` tests with coverage enabled, `blazor-wasm-github-pages`, and `publish-nuget-immutable` currently fail under act when they upload an artifact. act's artifact server doesn't support `upload-artifact@v7` yet ([nektos/act#6022](https://github.com/nektos/act/issues/6022)). Every step before the upload still runs, including generating coverage summaries and publishing to the test feed, so most problems show up locally. The uploads and the follow-up checks only run on GitHub.
+>
+> `publish-app-immutable` stops at the upload of its first build, so its packaging step only runs on GitHub. The unit tests of the workflow tools cover the packaging.
 
 To run the unit tests of the workflow tools without act:
 
