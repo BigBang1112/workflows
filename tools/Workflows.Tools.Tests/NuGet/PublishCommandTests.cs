@@ -43,11 +43,10 @@ public sealed class PublishCommandTests
             };
         });
 
-        await new PublishCommand(runner.Context, processes).RunAsync();
+        await Assert.ThrowsAsync<WorkflowException>(() => new PublishCommand(runner.Context, processes).RunAsync());
 
         CollectionAssert.AreEqual(new[] { "New", "Partial" }, runner.State.NewlyUploaded.Select(package => package.Id).ToList());
         StringAssert.Contains(runner.Output, "has-new=true");
-        StringAssert.Contains(runner.Output, "has-failures=true");
     }
 
     [TestMethod]
@@ -67,7 +66,6 @@ public sealed class PublishCommandTests
 
         Assert.AreEqual(0, runner.State.NewlyUploaded.Count);
         StringAssert.Contains(runner.Output, "has-new=false");
-        StringAssert.Contains(runner.Output, "has-failures=false");
     }
 
     [TestMethod]
@@ -100,11 +98,33 @@ public sealed class PublishCommandTests
         runner.State.Manifest = [runner.Entry("Lib", "1.0.0")];
 
         var processes = new FakeProcessRunner();
-        await new PublishCommand(runner.Context, processes).RunAsync();
+        await Assert.ThrowsAsync<WorkflowException>(() => new PublishCommand(runner.Context, processes).RunAsync());
 
         Assert.AreEqual(0, processes.Calls.Count);
         StringAssert.Contains(runner.Log.ToString(), "Lib.1.0.0.nupkg -> NuGet.org: missing API key");
-        StringAssert.Contains(runner.Output, "has-failures=true");
+    }
+
+    [TestMethod]
+    [DataRow(true, "error", "| A 1.0.0 | uploaded | duplicate | failed |")]
+    [DataRow(false, "Push finished", "| A 1.0.0 | uploaded | duplicate | unconfirmed |")]
+    public async Task Run_FailsAfterAllPushesWhenAnyPushIsNotUploadedOrDuplicate(bool symbolsFail, string symbolsOutput, string expectedRow)
+    {
+        using var runner = new TestRunner();
+        runner.Environment["NUGET_API_KEY"] = "nuget-key";
+        runner.Environment["GITHUB_PACKAGES_TOKEN"] = "github-token";
+        runner.WritePackage("A", "1.0.0", withSymbols: true);
+        runner.State.Manifest = [runner.Entry("A", "1.0.0"), runner.Entry("B", "1.0.0")];
+
+        var processes = new FakeProcessRunner((_, arguments) => arguments[2].EndsWith(".snupkg")
+            ? symbolsFail ? FakeProcessRunner.Failure(symbolsOutput) : FakeProcessRunner.Success(symbolsOutput)
+            : FakeProcessRunner.Success(arguments[6].Contains("github") ? "409 Conflict" : Pushed));
+
+        var exception = await Assert.ThrowsAsync<WorkflowException>(() => new PublishCommand(runner.Context, processes).RunAsync());
+
+        Assert.AreEqual("One or more package feeds rejected an upload. See the job summary.", exception.Message);
+        Assert.AreEqual(5, processes.Calls.Count);
+        StringAssert.Contains(runner.Summary, expectedRow);
+        StringAssert.Contains(runner.Output, "has-new=true");
     }
 
     [TestMethod]
@@ -115,7 +135,8 @@ public sealed class PublishCommandTests
         runner.Environment["NUGET_API_KEY"] = "secret-key";
         runner.State.Manifest = [runner.Entry("Lib", "1.0.0")];
 
-        await new PublishCommand(runner.Context, new FakeProcessRunner((_, _) => FakeProcessRunner.Failure("bad key secret-key"))).RunAsync();
+        var processes = new FakeProcessRunner((_, _) => FakeProcessRunner.Failure("bad key secret-key"));
+        await Assert.ThrowsAsync<WorkflowException>(() => new PublishCommand(runner.Context, processes).RunAsync());
 
         StringAssert.Contains(runner.Log.ToString(), "bad key [redacted]");
         Assert.IsFalse(runner.Log.ToString().Contains("secret-key"));

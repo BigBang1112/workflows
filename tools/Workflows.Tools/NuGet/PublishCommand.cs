@@ -12,8 +12,9 @@ internal sealed record Feed(string Name, string Url, string ApiKey);
 /// A symbols-only upload doesn't count.
 /// </summary>
 /// <remarks>
-/// Outputs <c>has-new</c> and <c>has-failures</c>, and writes a table of every result to the job summary.
-/// Failures don't stop the remaining pushes, so a release can still be created for what was uploaded.
+/// Outputs <c>has-new</c> and writes a table of every result to the job summary.
+/// A push that is neither uploaded nor skipped as a duplicate fails the command, but only after
+/// the remaining pushes and the summary, so the summary shows every result.
 /// </remarks>
 internal sealed class PublishCommand(ActionsContext context, IProcessRunner processes)
 {
@@ -59,8 +60,12 @@ internal sealed class PublishCommand(ActionsContext context, IProcessRunner proc
         state.Results = results;
         state.NewlyUploaded = newlyUploaded;
         context.SetOutput("has-new", newlyUploaded.Count > 0 ? "true" : "false");
-        context.SetOutput("has-failures", hasFailures ? "true" : "false");
         context.AppendSummary(Summary(feeds, results, newlyUploaded.Count, includeSymbols: nugetFeed is not null));
+
+        if (hasFailures)
+        {
+            throw new WorkflowException("One or more package feeds rejected an upload. See the job summary.");
+        }
     }
 
     internal IReadOnlyList<Feed> ConfiguredFeeds()
