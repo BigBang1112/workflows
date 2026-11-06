@@ -21,7 +21,7 @@ public sealed class AnnouncementTests
             "Package.X",
             RunUrl);
 
-        Assert.AreEqual("Fixed a bug.\n\n### Package.Y 9.0.0\n\nAdded a feature.\n\n" + Footer, notes);
+        Assert.AreEqual("Fixed a bug.\n### Package.Y 9.0.0\nAdded a feature.\n\n" + Footer, notes);
     }
 
     [TestMethod]
@@ -32,7 +32,7 @@ public sealed class AnnouncementTests
             "",
             RunUrl);
 
-        Assert.AreEqual("### Package.X 2.0.0\n\nFixed a bug.\n\n### Package.Y 9.0.0\n\nAdded a feature.\n\n" + Footer, notes);
+        Assert.AreEqual("### Package.X 2.0.0\nFixed a bug.\n### Package.Y 9.0.0\nAdded a feature.\n\n" + Footer, notes);
     }
 
     [TestMethod]
@@ -44,7 +44,7 @@ public sealed class AnnouncementTests
             RunUrl,
             "  A big release!\n");
 
-        Assert.AreEqual("A big release!\n\nFixed a bug.\n\n### Package.Y 9.0.0\n\nAdded a feature.\n\n" + Footer, notes);
+        Assert.AreEqual("A big release!\n\nFixed a bug.\n### Package.Y 9.0.0\nAdded a feature.\n\n" + Footer, notes);
     }
 
     [TestMethod]
