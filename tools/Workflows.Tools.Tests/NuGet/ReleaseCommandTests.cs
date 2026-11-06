@@ -83,8 +83,7 @@ public sealed class ReleaseCommandTests
             new[] { "release", "create", "v2.0.0", newPackage, existingPackage, Path.ChangeExtension(existingPackage, ".snupkg") },
             arguments.Take(6).ToList());
         var notes = File.ReadAllText(runner.State.ReleaseNotesPath);
-        StringAssert.StartsWith(notes, "Existing notes\n\n");
-        StringAssert.Contains(notes, "### New 1.0.0\n\nNew notes");
+        StringAssert.StartsWith(notes, "Existing notes\n### New 1.0.0\nNew notes\n\n");
         StringAssert.Contains(runner.Output, "created=true");
     }
 

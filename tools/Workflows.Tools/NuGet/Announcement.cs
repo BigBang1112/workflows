@@ -38,15 +38,14 @@ internal static class Announcement
             sections.Add(trimmedDescription);
         }
 
-        if (main is not null)
-        {
-            sections.Add(NotesOf(main));
-        }
-
-        sections.AddRange(packages
+        List<string> notes = main is null ? [] : [NotesOf(main)];
+        notes.AddRange(packages
             .Where(package => package != main)
             .OrderBy(package => package.Id, StringComparer.OrdinalIgnoreCase)
             .Select(Section));
+
+        // GitHub already spaces headings, so no blank lines surround them.
+        sections.Add(string.Join("\n", notes));
 
         sections.Add(GitHubRelease.GeneratedBy(runUrl));
         return string.Join("\n\n", sections) + "\n";
@@ -101,7 +100,7 @@ internal static class Announcement
         return string.Join("\n\n", sections) + "\n";
     }
 
-    private static string Section(PackageEntry package) => $"### {package.Id} {package.Version}\n\n{NotesOf(package)}";
+    private static string Section(PackageEntry package) => $"### {package.Id} {package.Version}\n{NotesOf(package)}";
 
     private static string NotesOf(PackageEntry package) => package.Notes.Length > 0 ? package.Notes : NoNotes;
 }
