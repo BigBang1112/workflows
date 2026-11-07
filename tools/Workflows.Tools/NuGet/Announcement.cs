@@ -53,7 +53,7 @@ internal static class Announcement
 
     /// <summary>
     /// The main package gets a "## ID Version" heading followed by the top lines and its notes.
-    /// Other packages with notes follow in their original order, then the links and the bottom lines.
+    /// Other packages with notes follow in their original order, then the links with the bottom lines directly below them.
     /// </summary>
     public static string DiscordMessage(
         IReadOnlyList<PackageEntry> packages,
@@ -90,12 +90,12 @@ internal static class Announcement
             links.Add($"NuGet: <https://nuget.org/packages/{main.Id}/{main.Version}>");
         }
 
-        sections.Add(string.Join("\n", links));
-
         if (bottomLines.Trim() is { Length: > 0 } bottom)
         {
-            sections.Add(bottom);
+            links.Add(bottom);
         }
+
+        sections.Add(string.Join("\n", links));
 
         return string.Join("\n\n", sections) + "\n";
     }
