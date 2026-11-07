@@ -29,6 +29,17 @@ A reusable workflow runs in the caller's repository, so it can't reach this repo
 
 act doesn't provide `job.workflow_*`, so under act (`env.ACT`) the tools are copied from the workspace instead. That works because act only runs this repository's own tests.
 
+### Composite actions
+
+NuGet.org trusted publishing doesn't accept a token from a reusable workflow in another repository, so [`publish-nuget-immutable/action.yml`](../publish-nuget-immutable/action.yml) has the same steps as a composite action. The runner downloads this whole repository for an action, so the action copies `$GITHUB_ACTION_PATH/../tools` to `$RUNNER_TEMP` instead of checking it out. Keep the action and the workflow in sync when you change either one.
+
+Composite actions differ from workflows in a few ways:
+
+- Every `run` step needs its own `shell: bash`.
+- Inputs are strings, so compare booleans with `== 'true'`.
+- There is no `secrets` context, so secrets are inputs.
+- The caller's job sets `permissions` and `concurrency`.
+
 Write the code so it can be tested without a runner or network access:
 
 - Read inputs and write outputs and the job summary through `ActionsContext`.

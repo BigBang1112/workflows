@@ -158,6 +158,55 @@ jobs:
           test -f Fixture.Core.1.0.0.snupkg
           test -f Fixture.Extra.1.1.0-beta.1.nupkg
 
+  # The same fixture through the composite action, with its own artifact name.
+  publish-nuget-immutable-action:
+    name: publish-nuget-immutable action
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      has-new: ${{ steps.publish.outputs.has-new }}
+    steps:
+      # A local action is read from the workspace, so the repository must be checked out first.
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Publish
+        id: publish
+        uses: ./publish-nuget-immutable
+        with:
+          dotnet-version: 10.0.x
+          project-path: tests/fixtures/nuget/src/*/*.csproj
+          test-path: tests/fixtures/nuget/tests/*/*.csproj
+          package-prefix: Fixture.
+          push-to-nuget: false
+          push-to-github: false
+          push-to-custom-feeds: true
+          custom-feed-urls: tests/fixtures/nuget/feed
+          custom-feed-api-keys: local-feed
+          artifact-name: nuget-packages-action
+          create-release: false
+
+  publish-nuget-immutable-action-packages:
+    name: publish-nuget-immutable action (check packages)
+    needs: publish-nuget-immutable-action
+    runs-on: ubuntu-slim
+    steps:
+      - name: Check newly uploaded output
+        run: test "${{ needs.publish-nuget-immutable-action.outputs.has-new }}" = true
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: nuget-packages-action
+
+      - name: Check packages
+        run: |
+          test -f Fixture.Core.1.0.0.nupkg
+          test -f Fixture.Core.1.0.0.snupkg
+          test -f Fixture.Extra.1.1.0-beta.1.nupkg
+
   # Packages the fixture app without a release. The merged case packages only the executables and a
   # package directory into one zip, like a Native AOT app with a plugin folder.
   publish-app-immutable:
@@ -232,6 +281,7 @@ jobs:
       - blazor-wasm-github-pages-site
       - check-agent-authorship-result
       - publish-nuget-immutable-packages
+      - publish-nuget-immutable-action-packages
       - publish-app-immutable-assets
     runs-on: ubuntu-slim
     steps:

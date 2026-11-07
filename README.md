@@ -1,6 +1,6 @@
 # Workflows
 
-Reusable GitHub Actions workflows for .NET projects. Call them from any repository with `workflow_call`.
+Reusable GitHub Actions workflows for .NET projects. Call them from any repository with `workflow_call`. NuGet publishing is also available as a [composite action](#publish-nuget-immutable-action) for trusted publishing.
 
 ## Usage
 
@@ -243,6 +243,49 @@ The release tag is the pushed tag when the workflow runs for one (and the releas
 
 The message starts with a `## [ID] [Version]` heading for the main package, followed by `discord-top-lines` and its notes. The other packages with release notes follow, each under a `### [ID] [Version]` heading, then links to the release and, when the main package is on NuGet.org, to its NuGet page. Long messages are split at line breaks into several messages, and rate-limited requests are retried.
 
+### `publish-nuget-immutable` action
+
+The same steps as [`publish-nuget-immutable.yml`](#publish-nuget-immutableyml), as a composite action. Use it for NuGet.org [trusted publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing), which doesn't work from a reusable workflow in another repository.
+
+NuGet.org checks the policy against the `job_workflow_ref` claim of the GitHub OIDC token. In a reusable workflow, that claim names the called workflow in this repository, so no policy for your repository can match ([NuGet/login#24](https://github.com/NuGet/login/issues/24), [NuGet/NuGetGallery#11000](https://github.com/NuGet/NuGetGallery/issues/11000)). A composite action runs as a step of your own job, so the claim names your workflow.
+
+```yaml
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    concurrency:
+      group: publish-nuget-${{ github.ref }}
+    steps:
+      - uses: bigbang1112/workflows/publish-nuget-immutable@main
+        with:
+          package-prefix: MyCompany.
+          main-project: MyCompany.Core
+          nuget-user: ${{ vars.NUGET_USER }}
+```
+
+On NuGet.org, add a trusted publishing policy for **your** repository and the workflow file that contains this job (e.g. `release.yml`). `nuget-user` is the NuGet.org user name of the policy owner, and `id-token: write` lets the job request the OIDC token. The action logs in with [NuGet/login](https://github.com/NuGet/login) right before the push, because the short-lived API key expires after an hour.
+
+The action checks out your repository itself. It takes the same inputs and has the same outputs as the workflow, with these differences:
+
+| Input | Description | Default |
+|---|---|---|
+| `nuget-user` | NuGet.org user name of the trusted publishing policy owner. When set, `nuget-api-key` is ignored. | `""` |
+| `nuget-api-key` | NuGet.org API key, used when `nuget-user` is empty. Replaces the `NUGET_API_KEY` secret. | `""` |
+| `custom-feed-api-keys` | Replaces the `CUSTOM_FEED_API_KEYS` secret | `""` |
+| `discord-webhook-url` | Replaces the `DISCORD_WEBHOOK_URL` secret | `""` |
+| `artifact-name` | Name of the artifact with the packed packages | `nuget-packages` |
+| `github-token` | Token for GitHub Packages and the release | `${{ github.token }}` |
+
+A composite action can't read secrets or declare permissions, so pass secrets as inputs and set `permissions` on your job. Set `concurrency` there too if releases shouldn't run at the same time. The workflow does this for you.
+
 ### `publish-app-immutable.yml`
 
 Publishes a .NET app on several runners, packages the output into zip files, and creates a GitHub release with them as assets. The release is created complete in a single call, so it works with [immutable releases](https://docs.github.com/repositories/releasing-projects-on-github/about-releases), which don't accept new assets once they're published.
@@ -402,6 +445,7 @@ Tests this repository. It lints every workflow file with [actionlint](https://gi
 
 - `blazor-wasm-github-pages.yml` runs without deploying. A follow-up job checks the base path in the uploaded site.
 - `publish-nuget-immutable.yml` publishes to a folder feed in the workspace, without a release or Discord message. A follow-up job checks the `has-new` output and the uploaded packages.
+- The `publish-nuget-immutable` action runs the same test and checks.
 - `publish-app-immutable.yml` packages the fixture app in [`tests/fixtures/app`](tests/fixtures/app) once per runner and once merged with a package directory, without a release. A follow-up job checks the contents of the zips and that the Linux executable stays executable.
 - `check-agent-authorship.yml` does a dry run against pull request #41 of this repository. A follow-up job checks that the result is `none`.
 
@@ -427,7 +471,7 @@ act workflow_dispatch -j dotnet-ci --matrix name:MTP
 ```
 
 > [!WARNING]
-> The `dotnet-ci` tests with coverage enabled, `blazor-wasm-github-pages`, and `publish-nuget-immutable` currently fail under act when they upload an artifact. act's artifact server doesn't support `upload-artifact@v7` yet ([nektos/act#6022](https://github.com/nektos/act/issues/6022)). Every step before the upload still runs, including generating coverage summaries and publishing to the test feed, so most problems show up locally. The uploads and the follow-up checks only run on GitHub.
+> The `dotnet-ci` tests with coverage enabled, `blazor-wasm-github-pages`, and both `publish-nuget-immutable` tests currently fail under act when they upload an artifact. act's artifact server doesn't support `upload-artifact@v7` yet ([nektos/act#6022](https://github.com/nektos/act/issues/6022)). Every step before the upload still runs, including generating coverage summaries and publishing to the test feed, so most problems show up locally. The uploads and the follow-up checks only run on GitHub.
 >
 > `publish-app-immutable` stops at the upload of its first build, so its packaging step only runs on GitHub. The unit tests of the workflow tools cover the packaging.
 
