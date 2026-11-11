@@ -1,4 +1,4 @@
-name: .NET CI
+name: Build and Test .NET
 
 on:
   workflow_call:
@@ -51,6 +51,10 @@ on:
         description: Cache NuGet packages
         type: boolean
         default: true
+      timeout-minutes:
+        description: Maximum minutes each build job can run before it is cancelled
+        type: number
+        default: 30
 
 permissions:
   contents: read
@@ -61,8 +65,9 @@ env:
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
+    name: Build and test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
 
     strategy:
       fail-fast: false

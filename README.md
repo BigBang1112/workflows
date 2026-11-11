@@ -5,6 +5,10 @@ Reusable GitHub Actions workflows for .NET projects. Call them from any reposito
 ## Usage
 
 ```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   ci:
     uses: bigbang1112/workflows/.github/workflows/dotnet-ci.yml@main
@@ -34,6 +38,7 @@ Restores, builds, and tests a .NET solution or project on one or more runners, a
 | `enable-coverage` | Collect Cobertura coverage into `$RUNNER_TEMP/coverage` | `true` |
 | `coverage-artifact-name` | Base name of the coverage report artifact, with the runner name appended. Set a distinct name when calling this workflow from several matrix jobs. | `coverage-report` |
 | `enable-cache` | Cache NuGet packages | `true` |
+| `timeout-minutes` | Maximum minutes each build job can run before it is cancelled | `30` |
 
 When TUnit generates a combined HTML test report, the workflow saves it as the `tunit-report-[runner]` artifact, even when tests fail. Download it from the workflow run to view `merged-report.html`. Projects without a TUnit report skip the upload.
 
@@ -71,6 +76,10 @@ It looks for `global.json` in `working-directory` and in the repository root. A 
 Publishes a Blazor WebAssembly app and deploys it to GitHub Pages. Before publishing, it sets the base path in `wwwroot/index.html` and, for PWAs, in `wwwroot/service-worker.published.js`, so the app works when it isn't served from the domain root.
 
 ```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   pages:
     uses: bigbang1112/workflows/.github/workflows/blazor-wasm-github-pages.yml@main
