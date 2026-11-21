@@ -21,7 +21,7 @@ public sealed class AnnouncementTests
             "Package.X",
             RunUrl);
 
-        Assert.AreEqual("Fixed a bug.\n### Package.Y 9.0.0\nAdded a feature.\n\n" + Footer, notes);
+        Assert.AreEqual("Fixed a bug.\n\n### Package.Y 9.0.0\n\nAdded a feature.\n\n" + Footer, notes);
     }
 
     [TestMethod]
@@ -32,7 +32,7 @@ public sealed class AnnouncementTests
             "",
             RunUrl);
 
-        Assert.AreEqual("### Package.X 2.0.0\nFixed a bug.\n### Package.Y 9.0.0\nAdded a feature.\n\n" + Footer, notes);
+        Assert.AreEqual("### Package.X 2.0.0\n\nFixed a bug.\n\n### Package.Y 9.0.0\n\nAdded a feature.\n\n" + Footer, notes);
     }
 
     [TestMethod]
@@ -44,7 +44,7 @@ public sealed class AnnouncementTests
             RunUrl,
             "  A big release!\n");
 
-        Assert.AreEqual("A big release!\n\nFixed a bug.\n### Package.Y 9.0.0\nAdded a feature.\n\n" + Footer, notes);
+        Assert.AreEqual("A big release!\n\nFixed a bug.\n\n### Package.Y 9.0.0\n\nAdded a feature.\n\n" + Footer, notes);
     }
 
     [TestMethod]
@@ -100,8 +100,8 @@ public sealed class AnnouncementTests
         var withoutNuGet = Announcement.DiscordMessage(packages, packages[0], releaseUrl, false, "", "");
 
         Assert.AreEqual(
-            "## GBX.NET 2.4.4\n\nIntroduction\n\n- Added a chunk\n\n"
-            + "### GBX.NET.PAK 2.4.4\n- Fixed blocks\n\n"
+            "## GBX.NET 2.4.4\nIntroduction\n- Added a chunk\n"
+            + "### GBX.NET.PAK 2.4.4\n- Fixed blocks\n"
             + "### GBX.NET.Crypto 1.2.2\n- Added MD5\n\n"
             + $"GitHub: <{releaseUrl}>\n"
             + "NuGet: <https://nuget.org/packages/GBX.NET/2.4.4>\n"
@@ -117,6 +117,6 @@ public sealed class AnnouncementTests
 
         var message = Announcement.DiscordMessage(packages, packages[0], "https://release", false, "Introduction", "");
 
-        Assert.AreEqual("## A 1.0.0\n\nIntroduction\n\n### C 1.0.0\n- Added\n\nGitHub: <https://release>\n", message);
+        Assert.AreEqual("## A 1.0.0\nIntroduction\n### C 1.0.0\n- Added\n\nGitHub: <https://release>\n", message);
     }
 }
