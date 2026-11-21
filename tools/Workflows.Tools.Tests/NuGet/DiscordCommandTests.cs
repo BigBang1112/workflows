@@ -36,7 +36,7 @@ public sealed class DiscordCommandTests
         Assert.IsGreaterThan(1, contents.Count);
         Assert.IsTrue(contents.All(content => content.Length <= DiscordWebhook.MessageLimit));
         Assert.IsTrue(handler.Requests.All(request => request.Request.Headers.UserAgent.Count == 0));
-        Assert.IsTrue(contents[0].StartsWith("## GBX.NET 2.4.4\n\n- Changed a thing\n"));
+        Assert.IsTrue(contents[0].StartsWith("## GBX.NET 2.4.4\n- Changed a thing\n"));
         StringAssert.EndsWith(contents[^1], "NuGet: <https://nuget.org/packages/GBX.NET/2.4.4>\n");
     }
 
@@ -65,7 +65,7 @@ public sealed class DiscordCommandTests
         await new DiscordCommand(runner.Context, new DiscordWebhook(new HttpClient(handler))).RunAsync();
 
         var message = Content(handler.Requests.Single().Body);
-        StringAssert.StartsWith(message, "## Existing 3.0.0\n\nExisting notes");
+        StringAssert.StartsWith(message, "## Existing 3.0.0\nExisting notes");
         StringAssert.Contains(message, "### GBX.NET 2.4.4\nNew notes");
         StringAssert.Contains(message, "NuGet: <https://nuget.org/packages/Existing/3.0.0>");
     }

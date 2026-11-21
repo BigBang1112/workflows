@@ -38,14 +38,15 @@ internal static class Announcement
             sections.Add(trimmedDescription);
         }
 
-        List<string> notes = main is null ? [] : [NotesOf(main)];
-        notes.AddRange(packages
+        if (main is not null)
+        {
+            sections.Add(NotesOf(main));
+        }
+
+        sections.AddRange(packages
             .Where(package => package != main)
             .OrderBy(package => package.Id, StringComparer.OrdinalIgnoreCase)
-            .Select(Section));
-
-        // GitHub already spaces headings, so no blank lines surround them.
-        sections.Add(string.Join("\n", notes));
+            .Select(package => $"### {package.Id} {package.Version}\n\n{NotesOf(package)}"));
 
         sections.Add(GitHubRelease.GeneratedBy(runUrl));
         return string.Join("\n\n", sections) + "\n";
@@ -63,26 +64,24 @@ internal static class Announcement
         string topLines,
         string bottomLines)
     {
-        List<string> mainSection = [$"## {main.Id} {main.Version}"];
+        // Discord already spaces headings, so no blank lines surround them.
+        List<string> notes = [$"## {main.Id} {main.Version}"];
 
         if (topLines.Trim() is { Length: > 0 } top)
         {
-            mainSection.Add(top);
+            notes.Add(top);
         }
 
         if (main.Notes.Length > 0)
         {
-            mainSection.Add(main.Notes);
+            notes.Add(main.Notes);
         }
 
-        // Discord already spaces headings, so the notes follow the heading directly.
-        List<string> sections =
-        [
-            string.Join("\n\n", mainSection),
-            .. packages
-                .Where(package => package != main && package.Notes.Length > 0)
-                .Select(package => $"### {package.Id} {package.Version}\n{package.Notes}"),
-        ];
+        notes.AddRange(packages
+            .Where(package => package != main && package.Notes.Length > 0)
+            .Select(package => $"### {package.Id} {package.Version}\n{package.Notes}"));
+
+        List<string> sections = [string.Join("\n", notes)];
         List<string> links = [$"GitHub: <{releaseUrl}>"];
 
         if (nugetAvailable)
@@ -99,8 +98,6 @@ internal static class Announcement
 
         return string.Join("\n\n", sections) + "\n";
     }
-
-    private static string Section(PackageEntry package) => $"### {package.Id} {package.Version}\n{NotesOf(package)}";
 
     private static string NotesOf(PackageEntry package) => package.Notes.Length > 0 ? package.Notes : NoNotes;
 }
